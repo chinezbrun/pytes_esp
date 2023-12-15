@@ -250,6 +250,7 @@ def statistics():
     global sys_temp
     global sys_basic_st
     global json_data
+    global parsing_time
     
     sys_voltage  = 0
     sys_current  = 0
@@ -267,6 +268,8 @@ def statistics():
     sys_soc      = int(sys_soc / powers)   
     sys_basic_st = pwr[0]['basic_st']                                         # status will be the master status
     sys_temp     = round((sys_temp / powers), 1)
+    
+    parsing_time = (time.ticks_ms() - parsing_time)/1000
     
     json_data= {'relay_local_time':TimeStamp,                   
                'powers' : powers,
@@ -492,7 +495,7 @@ while True:
         if errors == 'false':
             parsing_time = time.ticks_ms()
             parsing_serial()
-            parsing_time = (time.ticks_ms() - parsing_time)/1000
+            
             
         if errors == 'false':
             mqtt_publish()
