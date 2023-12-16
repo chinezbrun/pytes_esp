@@ -5,6 +5,6 @@
 mqtt:
   sensor:
     - name: pytes_uptime
-      state_topic: "homeassistant/sensor/pytes/state"  
+      state_topic: "homeassistant/sensor/pytes_esp/state"  
       value_template: '{{ value_json.serial_stat.uptime }}'
       unit_of_measurement: ''
