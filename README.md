@@ -40,8 +40,8 @@ connection with simple RS232serial to TTL module (without DB9 connector) - NOT T
     - ESP32 PIN:     GND ------ GND converter GND ----- RJ45 Pin: 4 GND
     - ESP32 PIN:    3.3V ------ VCC converter  
 
-Both coonection works, mportant is to respect PYTES console port pinout documentation and to ensure correct connection of TX, RX trough all chain, that was proved to be one of main source of failure and frustration. 
-In case something goes wrong swapping RXD and TXD on one side will do the magig in most of the cases.
+Both coonection works, important is to respect PYTES console port pinout documentation and to ensure correct connection of TX, RX trough all chain, that was proved to be one of main source of failure and frustration. 
+In case something goes wrong, swapping RXD and TXD on one side, will do the magic in most of the cases.
 
 
 ### Installation and Execution
