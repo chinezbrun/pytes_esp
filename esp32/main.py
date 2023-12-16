@@ -1,24 +1,25 @@
-# ESP32 micropython script based on Pytes_Serial version 0.6.0
+# ESP32 micropython script based on Pytes_Serial
 # https://github.com/chinezbrun/pytes_serial
 
-import pytes_esp_config               # import user configuration file
+import config                         # import user configuration file
 import time
 import json
 import ubinascii                      # used for mqtt
-from umqttsimple import MQTTClient    # used for mqtt
+from umqtt.simple import MQTTClient   # used for mqtt
+import ntptime                        # used for sync time
 
 # imported variables
-reading_freq          = pytes_esp_config.reading_freq
-wlan_ssid             = pytes_esp_config.wlan_ssid
-wlan_pass             = pytes_esp_config.wlan_pass
-mqtt_broker           = pytes_esp_config.mqtt_broker
-mqtt_port             = pytes_esp_config.mqtt_port
-mqtt_user             = pytes_esp_config.mqtt_user
-mqtt_pass             = pytes_esp_config.mqtt_pass
-powers                = pytes_esp_config.powers
-dev_name              = pytes_esp_config.dev_name
-manufacturer          = pytes_esp_config.manufacturer
-model                 = pytes_esp_config.model 
+reading_freq          = config.reading_freq
+wlan_ssid             = config.wlan_ssid
+wlan_pass             = config.wlan_pass
+mqtt_broker           = config.mqtt_broker
+mqtt_port             = config.mqtt_port
+mqtt_user             = config.mqtt_user
+mqtt_pass             = config.mqtt_pass
+powers                = config.powers
+dev_name              = config.dev_name
+manufacturer          = config.manufacturer
+model                 = config.model 
 
 # fix variable
 start_time            = time.ticks_ms()                     # init time
@@ -32,7 +33,7 @@ line_str_array        = []                                  # used to get line s
 bat_events_no         = 0                                   # used to count numbers of battery events
 pwr_events_no         = 0                                   # used to count numbers of power events
 sys_events_no         = 0                                   # used to count numbers of system events
-sw_ver                = "PytesSerial_Esp v0.1.0_20231215"
+sw_ver                = "PytesSerial_Esp v0.2.0_20231216"
 version               = sw_ver
 
 def serial_write(req, size):
@@ -288,7 +289,7 @@ def statistics():
                                'efficiency' :round((1-(errors_no/loops_no))*100,2),
                                'ser_round_trip':round(parsing_time,2)}
                 }  
-  
+
 def mqtt_discovery():
     try:
         #MQTT_auth = None
@@ -405,10 +406,11 @@ def mqtt_publish():
 
 
 #-----------------------------main loop-----------------------------
-# control LED
+init = 'true'
+print ('START - ' + version)
+# init control LED
 led = machine.Pin(2,machine.Pin.OUT)
 led.on()
-init = 'true'
 
 #connect to wifi network
 wlan = network.WLAN(network.STA_IF)
@@ -437,9 +439,16 @@ while wlan.isconnected() == False:
     pass
 
 print('...wlan connection successful')
-print(wlan.ifconfig())
+print('.....', wlan.ifconfig())
 led.off()
 
+#clock synch
+try:
+    ntptime.settime()
+    print ('.....', time.localtime())
+except Exception as e:
+    print('...clock synch initialization failed: ', e)
+    
 # uart serial initialization
 try:
     uart = machine.UART (2, 115200) # init with given parameters
@@ -474,10 +483,10 @@ if init=='false':
     
     machine.reset()
 
-print('...program initialisation completed starting main loop')
-print ('START - ' + version)
 led.off()
+print('...program initialisation completed starting main loop')
 
+# starting main loop
 while True:
     if (time.ticks_ms() - start_time)/1000 > reading_freq:                       
         
@@ -495,7 +504,7 @@ while True:
         if errors == 'false':
             parsing_time = time.ticks_ms()
             parsing_serial()
-            
+            parsing_time = (time.ticks_ms() - parsing_time)/1000
             
         if errors == 'false':
             mqtt_publish()
