@@ -17,17 +17,11 @@ and the example in docs folder [here](/docs/home_assistant_add_sensor.txt).
 You can have more examples in full fladged program [Pytes_serial](https://github.com/chinezbrun/pytes_serial) for better understanding of what program does.
 
 ### Hardware used:
-<<<<<<< HEAD
 ESP32 board -------------------------- tested on [ESP32 WROOM 38 pins](https://ardushop.ro/ro/home/1449-nodemcu-32s-38.html?gclid=Cj0KCQiAsvWrBhC0ARIsAO4E6f__t1Ywa7ggggVlMvGm_M-wFgtWkX1XTycMhfIoM2PXSL1DMHdIcT4aAnxIEALw_wcB)
 
 RS232 to TTL converter --------------- tested on [RS232 to TTL](https://ardushop.ro/ro/home/1000-modul-convertor-rs232-la-ttl.html?gclid=Cj0KCQiAj_CrBhD-ARIsAIiMxT8nFVhCUMI8Yi6TL5PcduTiSrrpuKuuT6yQOPc_AZKAXNdEZIFjbh0aAsJcEALw_wcB)
 
 RJ45 to RS232 DB9(male) cable -------- tested on [RJ45 to DB09 male](https://conectica.ro/cabluri/cabluri-serial-paralel/cablu-rs-232-db9-la-serial-rs-232-rj45-t-t-1m-delock-63353?gclid=Cj0KCQiAj_CrBhD-ARIsAIiMxT_3N9k6NLPS0_ijAbA9MOQHWsMki5tpK4ePdUKZ6PGpd-NPL4IooqQaAv8fEALw_wcB) 
-=======
-ESP32 board ---------------------------- tested on [ESP32 WROOM 38 pins](https://ardushop.ro/ro/home/1449-nodemcu-32s-38.html?gclid=Cj0KCQiAsvWrBhC0ARIsAO4E6f__t1Ywa7ggggVlMvGm_M-wFgtWkX1XTycMhfIoM2PXSL1DMHdIcT4aAnxIEALw_wcB)     
-RS232 to TTL converter ---------------- tested on [RS232 to TTL](https://ardushop.ro/ro/home/1000-modul-convertor-rs232-la-ttl.html?gclid=Cj0KCQiAj_CrBhD-ARIsAIiMxT8nFVhCUMI8Yi6TL5PcduTiSrrpuKuuT6yQOPc_AZKAXNdEZIFjbh0aAsJcEALw_wcB)    
-Standard console cable for PYTES ----- tested on [RJ45 to DB09 male](https://conectica.ro/cabluri/cabluri-serial-paralel/cablu-rs-232-db9-la-serial-rs-232-rj45-t-t-1m-delock-63353?gclid=Cj0KCQiAj_CrBhD-ARIsAIiMxT_3N9k6NLPS0_ijAbA9MOQHWsMki5tpK4ePdUKZ6PGpd-NPL4IooqQaAv8fEALw_wcB)
->>>>>>> 89fdd3c5d0d8dea84f064e209c61322017775201
 
 simple connection flow:
 esp32 [uart2 used for tx/rx] -> TTL to RS232 -> DB09 to RJ45 cable  -> Pytes RJ45 console port
@@ -48,15 +42,9 @@ connection with simple RS232serial to TTL module (without DB9 connector) - NOT T
     - ESP32 PIN:     GND ------ GND converter GND ----- RJ45 Pin: 4 GND
     - ESP32 PIN:    3.3V ------ VCC converter  
 
-<<<<<<< HEAD
 Both coonection works, important is to respect the PYTES console port pinout documentation and to ensure correct connection of TX, RX trough all chain, that was proved to be one of main source of failure and frustration. 
 In case something goes wrong, swapping RXD and TXD on one side will do the magic in most of the cases.
 You can find more pictures in [docs](/docs/) folder.
-=======
-Both coonection works, important is to respect PYTES console port pinout documentation and to ensure correct connection of TX, RX trough all chain, that was proved to be one of main source of failure and frustration. 
-In case something goes wrong, swapping RXD and TXD on one side, will do the magic in most of the cases.
-
->>>>>>> 89fdd3c5d0d8dea84f064e209c61322017775201
 
 ### Installation and Execution
 1. Install Thonny IDE -- interpreter to write,read with ESP32 -- guide [here](https://www.youtube.com/watch?v=rP4E5IyB_E0)
