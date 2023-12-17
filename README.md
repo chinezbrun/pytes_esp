@@ -57,9 +57,9 @@ You can find more pictures in [docs](/docs/) folder.
    * in Home Assisatant device created with all associated sensors - like [this](/docs/Home_assistant_device.jpg)
 
 ### Normal operation
-When ESP is powered, the script starts runining in a loop and reads the serial port with defined freqvency.
+When the ESP32 is powered, the script starts running in a loop and will read the serial port with a defined frequency.
 
-The board LED blinking can give some functionality details as following:
+The LED on the ESP32 board can provide some functionality details as follows:
 
     - initialization phase (wifi, MQTT discovery)  - fast blinks [1/0.1sec]
     - initialization errors                        - 10s of constant blinks [1/sec] before device REBOOT  
