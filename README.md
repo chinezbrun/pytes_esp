@@ -53,17 +53,17 @@ You can find more pictures in [docs](/docs/) folder.
 4. Open config.py file and do your configuration (wifi, mqtt, batteries) -> save to ESP32
 5. Connect the hardware as per recomandation above
 6. Press restart ESP32 device and you should be able to see:
-   - in Thonny shell: succesful initialization...Wifi, Serial, MQTT and the program running - like this thonny_shell_esp_initialization.jpg
-   - in Home Assisatant device created with all associated sensors - like this  Home_assistant_device.jpg
+   * in Thonny shell: succesful initialization...Wifi, Serial, MQTT and the program running - like [this](/docs/thonny_shell_esp_initialization.jpg)
+   * in Home Assisatant device created with all associated sensors - like [this](/docs/Home_assistant_device.jpg)
 
 ### Normal operation
 When ESP is powered, the script starts runining in a loop and reads the serial port with defined freqvency.
 
 The board LED blinking can give some functionality details as following:
 
-initialization phase (wifi, MQTT discovery)  - fast blinks [1/0.1sec]    
-initialization errors                        - 10s of constant blinks [1/sec] before device REBOOT  
-normal operation                             - led ON reads, led off during waiting time  
-program stopped                              - no led activity -- can be ON or OFF  
+    - initialization phase (wifi, MQTT discovery)  - fast blinks [1/0.1sec]
+    - initialization errors                        - 10s of constant blinks [1/sec] before device REBOOT  
+    - normal operation                             - led ON reads, led off during waiting time  
+    - program stopped                              - no led activity -- can be ON or OFF  
 
 enjoy
