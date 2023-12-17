@@ -61,9 +61,9 @@ When ESP is powered, the script starts runining in a loop and reads the serial p
 
 The board LED blinking can give some functionality details as following:
 
-initialization phase (wifi, MQTT discovery)  - fast blinks [1/0.1sec]  
-initialization errors                        - 10s of constant blinks [1/sec] before device REBOOT
-normal operation                             - led ON reads, led off during waiting time
-program stopped                              - no led activity -- can be ON or OFF
+initialization phase (wifi, MQTT discovery)  - fast blinks [1/0.1sec]    
+initialization errors                        - 10s of constant blinks [1/sec] before device REBOOT  
+normal operation                             - led ON reads, led off during waiting time  
+program stopped                              - no led activity -- can be ON or OFF  
 
 enjoy
