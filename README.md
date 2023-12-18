@@ -24,9 +24,9 @@ RS232 to TTL converter --------------- tested on [RS232 to TTL](https://ardushop
 RJ45 to RS232 DB9(male) cable -------- tested on [RJ45 to DB09 male](https://conectica.ro/cabluri/cabluri-serial-paralel/cablu-rs-232-db9-la-serial-rs-232-rj45-t-t-1m-delock-63353?gclid=Cj0KCQiAj_CrBhD-ARIsAIiMxT_3N9k6NLPS0_ijAbA9MOQHWsMki5tpK4ePdUKZ6PGpd-NPL4IooqQaAv8fEALw_wcB) 
 
 simple connection flow:
-esp32 [uart2 used for tx/rx] -> TTL to RS232 -> DB09 to RJ45 cable  -> Pytes RJ45 console port
+esp32 [uart2 used for tx/rx](/docs/esp32_wrom-38pins_pinused.jpg) -> [TTL to RS232](/docs/converter_RS232ToTTL.JPG) -> [DB09 to RJ45 cable](/docs/cable_RJ45_DB9_pin_connection.jpg)  -> Pytes RJ45 console port
 
-connection with RS232serial to TTL with DB9(female) [converter](/docs/converter_RS232ToTTL.JPG) using  RJ45 to RS232 DB9(male) [cable](/docs/cable_RJ45_DB9_pin_connection.jpg)- TESTED:
+connection with RS232serial to TTL with DB9(female) converter using  RJ45 to RS232 DB9(male) cable - TESTED:
 
     - ESP32 Pin: 16 RXD2 ------ RX converter  RX  DB9 Female ------ DB9 Male console cable RJ45 Pin: 3 TXD 
     - ESP32 Pin: 17 TXD2 ------ TX converter  TX  DB9 Female ------ DB9 Male console cable RJ45 Pin: 6 RXD 
