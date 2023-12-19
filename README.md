@@ -18,9 +18,9 @@ and the example in docs folder [here](/docs/home_assistant_add_sensor.txt).
 You can have more examples in full fladged program [Pytes_serial](https://github.com/chinezbrun/pytes_serial) for better understanding of what program does.
 
 ### Hardware used:
-ESP32 board --------------------------- tested on [ESP32 WROOM 38 pins](https://ardushop.ro/ro/home/1449-nodemcu-32s-38.html?gclid=Cj0KCQiAsvWrBhC0ARIsAO4E6f__t1Ywa7ggggVlMvGm_M-wFgtWkX1XTycMhfIoM2PXSL1DMHdIcT4aAnxIEALw_wcB)
+ESP32 board ---------------------------- tested on [ESP32 WROOM 38 pins](https://ardushop.ro/ro/home/1449-nodemcu-32s-38.html?gclid=Cj0KCQiAsvWrBhC0ARIsAO4E6f__t1Ywa7ggggVlMvGm_M-wFgtWkX1XTycMhfIoM2PXSL1DMHdIcT4aAnxIEALw_wcB)
 
-RS232 to TTL converter ---------------- tested on [RS232 to TTL](https://ardushop.ro/ro/home/1000-modul-convertor-rs232-la-ttl.html?gclid=Cj0KCQiAj_CrBhD-ARIsAIiMxT8nFVhCUMI8Yi6TL5PcduTiSrrpuKuuT6yQOPc_AZKAXNdEZIFjbh0aAsJcEALw_wcB)
+RS232 to TTL converter ----------------- tested on [RS232 to TTL](https://ardushop.ro/ro/home/1000-modul-convertor-rs232-la-ttl.html?gclid=Cj0KCQiAj_CrBhD-ARIsAIiMxT8nFVhCUMI8Yi6TL5PcduTiSrrpuKuuT6yQOPc_AZKAXNdEZIFjbh0aAsJcEALw_wcB)
 
 RJ45 to RS232 DB9(male) cable -------- tested on [RJ45 to DB09 male](https://conectica.ro/cabluri/cabluri-serial-paralel/cablu-rs-232-db9-la-serial-rs-232-rj45-t-t-1m-delock-63353?gclid=Cj0KCQiAj_CrBhD-ARIsAIiMxT_3N9k6NLPS0_ijAbA9MOQHWsMki5tpK4ePdUKZ6PGpd-NPL4IooqQaAv8fEALw_wcB) 
 
