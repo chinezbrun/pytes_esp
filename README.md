@@ -7,7 +7,8 @@ A signal converter from RS323 to TTL is needed between Pytes serial console port
 
 ### How does this software work?
 Program reads serial port with a specific freqvency, parsing the data and send it trought MQTT.
-JSON file is send as payload to the following topic: 'homeassistant/sensor/pytes_esp/state'
+JSON file is send as payload to the following topic: 'homeassistant/sensor/pytes_esp/state'. 
+
 Program has build-in integration with Home Assisant where the following sensors will be automatic created for each battery:
   - "pytes_esp_current", "pytes_esp_voltage", "pytes_esp_temperature", "pytes_esp_soc", "pytes_esp_status"
    the battery number is embeded at the end of each sensor (i.e pytes_esp_current_1, pytes_esp_current_2...)
@@ -17,9 +18,9 @@ and the example in docs folder [here](/docs/home_assistant_add_sensor.txt).
 You can have more examples in full fladged program [Pytes_serial](https://github.com/chinezbrun/pytes_serial) for better understanding of what program does.
 
 ### Hardware used:
-ESP32 board -------------------------- tested on [ESP32 WROOM 38 pins](https://ardushop.ro/ro/home/1449-nodemcu-32s-38.html?gclid=Cj0KCQiAsvWrBhC0ARIsAO4E6f__t1Ywa7ggggVlMvGm_M-wFgtWkX1XTycMhfIoM2PXSL1DMHdIcT4aAnxIEALw_wcB)
+ESP32 board --------------------------- tested on [ESP32 WROOM 38 pins](https://ardushop.ro/ro/home/1449-nodemcu-32s-38.html?gclid=Cj0KCQiAsvWrBhC0ARIsAO4E6f__t1Ywa7ggggVlMvGm_M-wFgtWkX1XTycMhfIoM2PXSL1DMHdIcT4aAnxIEALw_wcB)
 
-RS232 to TTL converter --------------- tested on [RS232 to TTL](https://ardushop.ro/ro/home/1000-modul-convertor-rs232-la-ttl.html?gclid=Cj0KCQiAj_CrBhD-ARIsAIiMxT8nFVhCUMI8Yi6TL5PcduTiSrrpuKuuT6yQOPc_AZKAXNdEZIFjbh0aAsJcEALw_wcB)
+RS232 to TTL converter ---------------- tested on [RS232 to TTL](https://ardushop.ro/ro/home/1000-modul-convertor-rs232-la-ttl.html?gclid=Cj0KCQiAj_CrBhD-ARIsAIiMxT8nFVhCUMI8Yi6TL5PcduTiSrrpuKuuT6yQOPc_AZKAXNdEZIFjbh0aAsJcEALw_wcB)
 
 RJ45 to RS232 DB9(male) cable -------- tested on [RJ45 to DB09 male](https://conectica.ro/cabluri/cabluri-serial-paralel/cablu-rs-232-db9-la-serial-rs-232-rj45-t-t-1m-delock-63353?gclid=Cj0KCQiAj_CrBhD-ARIsAIiMxT_3N9k6NLPS0_ijAbA9MOQHWsMki5tpK4ePdUKZ6PGpd-NPL4IooqQaAv8fEALw_wcB) 
 
@@ -48,7 +49,7 @@ You can find more pictures in [docs](/docs/) folder.
 
 ### Installation and Execution
 1. Install Thonny IDE -- interpreter to write,read with ESP32 -- guide [here](https://www.youtube.com/watch?v=rP4E5IyB_E0)
-2. Install Micropython firmware on the ESP32 board            -- latest firmare [here](https://micropython.org/download/ESP32_GENERIC/)
+2. Install Micropython firmware on the ESP32 board            -- latest firmware [here](https://micropython.org/download/ESP32_GENERIC/)
 3. Download pytes_esp repository and copy the content of ESP32 folder to ESP32device      
 4. Open config.py file and do your configuration (wifi, mqtt, batteries) -> save to ESP32
 5. Connect the hardware as per recomandation above
