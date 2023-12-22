@@ -10,6 +10,7 @@ import ntptime                        # used for sync time
 
 # imported variables
 reading_freq          = config.reading_freq
+auto_reboot           = config.auto_reboot
 wlan_ssid             = config.wlan_ssid
 wlan_pass             = config.wlan_pass
 mqtt_broker           = config.mqtt_broker
@@ -20,6 +21,7 @@ powers                = config.powers
 dev_name              = config.dev_name
 manufacturer          = config.manufacturer
 model                 = config.model 
+
 
 # fix variable
 start_time            = time.ticks_ms()                     # init time
@@ -33,7 +35,7 @@ line_str_array        = []                                  # used to get line s
 bat_events_no         = 0                                   # used to count numbers of battery events
 pwr_events_no         = 0                                   # used to count numbers of power events
 sys_events_no         = 0                                   # used to count numbers of system events
-sw_ver                = "PytesSerial_Esp v0.2.0_20231216"
+sw_ver                = "PytesSerial_Esp v0.2.1_20231222"
 version               = sw_ver
 
 def serial_write(req, size):
@@ -404,6 +406,17 @@ def mqtt_publish():
     except Exception as e:
         print ('...mqtt publish error: ' + str(e))
 
+def reboot_machine():
+    # blink LED 20s
+    ledtime = time.ticks_ms()
+    while time.ticks_ms() - ledtime < 20000:
+        led.off()
+        time.sleep(0.5)
+        led.on()
+        time.sleep(0.5)
+        led.off()
+    # restart ESP32
+    machine.reset()
 
 #-----------------------------main loop-----------------------------
 init = 'true'
@@ -473,15 +486,7 @@ except Exception as e:
 # restart ESP32 if initialisation failed
 if init=='false':
     print('...program initialisation failed restart machine in 20s')
-    ledtime = time.ticks_ms()
-    while time.ticks_ms() - ledtime < 20000:
-        led.off()
-        time.sleep(0.5)
-        led.on()
-        time.sleep(0.5)
-        led.off()
-    
-    machine.reset()
+    reboot_machine()
 
 led.off()
 print('...program initialisation completed starting main loop')
@@ -516,6 +521,10 @@ while True:
         print ('...serial stat   :', 'parsing round-trip:' , round(parsing_time, 2)) 
         print ('------------------------------------------------------')
         
+        if auto_reboot != 0 and auto_reboot < uptime:
+            print('...scheduled auto reboot in 20s')
+            reboot_machine()
+            
         #clear variables
         pwr        = []
         errors     = 'false'
