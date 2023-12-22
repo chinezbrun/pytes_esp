@@ -1,6 +1,6 @@
 # general
 reading_freq  = 10                     # default = 10        -- reading freqvency [seconds] of the serial port
-auto_reboot   = 0                      # default = 0         -- ESP autoreboot interval [days] -- not implemented yet
+auto_reboot   = 0                      # default = 0         -- ESP autoreboot interval [days] 
 
 # wifi
 wlan_ssid     = 'yourwifissid'         # your wifi network
