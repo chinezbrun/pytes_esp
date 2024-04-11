@@ -35,7 +35,7 @@ line_str_array        = []                                  # used to get line s
 bat_events_no         = 0                                   # used to count numbers of battery events
 pwr_events_no         = 0                                   # used to count numbers of power events
 sys_events_no         = 0                                   # used to count numbers of system events
-sw_ver                = "PytesSerial_Esp v0.2.1_20231222"
+sw_ver                = "PytesSerial_Esp v0.2.2_20240411"
 version               = sw_ver
 
 def serial_write(req, size):
@@ -493,6 +493,7 @@ print('...program initialisation completed starting main loop')
 
 # starting main loop
 while True:
+    time.sleep(0.2)
     if (time.ticks_ms() - start_time)/1000 > reading_freq:                       
         
         led.on()
