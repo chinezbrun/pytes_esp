@@ -5,7 +5,7 @@ import config                         # import user configuration file
 import time
 import json
 import ubinascii                      # used for mqtt
-from umqtt.simple import MQTTClient   # used for mqtt
+from umqtt.robust import MQTTClient   # used for mqtt
 import ntptime                        # used for sync time
 
 # imported variables
@@ -35,7 +35,7 @@ line_str_array        = []                                  # used to get line s
 bat_events_no         = 0                                   # used to count numbers of battery events
 pwr_events_no         = 0                                   # used to count numbers of power events
 sys_events_no         = 0                                   # used to count numbers of system events
-sw_ver                = "PytesSerial_Esp v0.2.2_20240411"
+sw_ver                = "PytesSerial_Esp v0.3.0_20240412"
 version               = sw_ver
 
 def serial_write(req, size):
@@ -73,10 +73,10 @@ def serial_read(start,stop):
 
         while True:
             if uart.any() > 0:
-                line          = uart.read(1)
-                line_str      = line_str + line.decode('latin-1')
+                line          = uart.readline()
+                line_str      = line.decode('latin-1')
                 
-                if line == b'\n':
+                if line:
                     if start == 'none' or start in line_str:
                         start = 'true'
                     if start == 'true' and stop != 'true':
@@ -85,7 +85,8 @@ def serial_read(start,stop):
                         stop = 'true'
                     
                     line_str = ""
-                    
+                    line = ""
+            
             else:
                  break
                 
@@ -272,8 +273,6 @@ def statistics():
     sys_basic_st = pwr[0]['basic_st']                                         # status will be the master status
     sys_temp     = round((sys_temp / powers), 1)
     
-    parsing_time = (time.ticks_ms() - parsing_time)/1000
-    
     json_data= {'relay_local_time':TimeStamp,                   
                'powers' : powers,
                'voltage': sys_voltage,
@@ -289,7 +288,7 @@ def statistics():
                                'pwr_events_no': pwr_events_no,
                                'sys_events_no': sys_events_no,
                                'efficiency' :round((1-(errors_no/loops_no))*100,2),
-                               'ser_round_trip':round(parsing_time,2)}
+                               'ser_round_trip':round((time.ticks_ms() - parsing_time)/1000,2)}
                 }  
 
 def mqtt_discovery():
@@ -465,7 +464,7 @@ except Exception as e:
 # uart serial initialization
 try:
     uart = machine.UART (2, 115200) # init with given parameters
-    uart.init (115200, bits=8, parity=None, stop=1, rxbuf=2048)
+    uart.init (115200, bits=8, parity=None, stop=1, rxbuf=2048, timeout=5, timeout_char=5)
     print('...serial initialization complete')
 except Exception as e:
     print('...serial initialization failed: ', e)
@@ -510,7 +509,6 @@ while True:
         if errors == 'false':
             parsing_time = time.ticks_ms()
             parsing_serial()
-            parsing_time = (time.ticks_ms() - parsing_time)/1000
             
         if errors == 'false':
             mqtt_publish()
@@ -519,7 +517,7 @@ while True:
             errors_no = errors_no + 1
             
         print ('...serial stat   :', 'loops:' , loops_no, 'errors:', errors_no, 'efficiency:', round((1-(errors_no/loops_no))*100, 2))
-        print ('...serial stat   :', 'parsing round-trip:' , round(parsing_time, 2)) 
+        print ('...serial stat   :', 'parsing round-trip:' , round((time.ticks_ms() - parsing_time)/1000, 2)) 
         print ('------------------------------------------------------')
         
         if auto_reboot != 0 and auto_reboot < uptime:
