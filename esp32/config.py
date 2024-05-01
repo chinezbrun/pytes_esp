@@ -18,3 +18,6 @@ dev_name      = "pytes_esp"            # default = pytes_esp           -- HomeAs
 manufacturer  = "PYTES Energy Co.Ltd"  # default = PYTES Energy Co.Ltd -- manufacturer name
 model         = "E-BOX-48100R"         # default = E-BOX-48100R        -- battery model
 
+# cells monitoring
+cells_monitoring       = "false"       # default = false -- set to 'true' to have cells monitoring active
+cells                  = 16            # default = 16 -- 16 for Pytes, 15 for Pylontech
