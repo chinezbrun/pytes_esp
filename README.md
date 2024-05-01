@@ -58,6 +58,7 @@ You can find more pictures in [docs](/docs/) folder.
 
 ### Normal operation
 When the ESP32 is powered, the script starts running in a loop and will read the serial port with a defined frequency.
+After version updates it is highly recomanded to delete all devices previous created in Home Assistant and to let them to be recreated at script start.
 
 The LED on the ESP32 board can provide some functionality details as follows:
 
