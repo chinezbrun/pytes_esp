@@ -1,5 +1,12 @@
-payload to the following topic: 'homeassistant/sensor/pytes_esp/state'. 
+### PYTES E-BOX 48100R / PYLONTECH to Home Assistant 
 
+The main code is the lighter version of [Pytes_serial](https://github.com/chinezbrun/pytes_serial), written in MicroPyton to be used with ESP32.
+
+This application runs on an ESP32 board and reads the RS232 serial port of PYTES or PYLONTECH batteries and sends data to Home Assistant via MQTT. Home Assistant autodiscovery is build in, so device will show up in Homeassistant automatically.
+A signal converter from RS323 to TTL is needed between Pytes serial console port and ESP32 serial port. 
+
+### How does this software work?
+Program reads serial port with a specific freqvency, parsing the data and send it trought MQTT.
 Program has build-in integration with Home Assisant where the following sensors will be automatic created for each battery:
   - "pytes_esp_current", "pytes_esp_voltage", "pytes_esp_temperature", "pytes_esp_soc", "pytes_esp_status"
    the battery number is embeded at the end of each sensor (i.e pytes_esp_current_1, pytes_esp_current_2...)
