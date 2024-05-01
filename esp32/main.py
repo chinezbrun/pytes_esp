@@ -7,6 +7,7 @@ import json
 import ubinascii                      # used for mqtt
 from umqtt.robust import MQTTClient   # used for mqtt
 import ntptime                        # used for sync time
+import re
 
 # imported variables
 reading_freq          = config.reading_freq
@@ -21,12 +22,15 @@ powers                = config.powers
 dev_name              = config.dev_name
 manufacturer          = config.manufacturer
 model                 = config.model 
-
+cells_monitoring      = config.cells_monitoring
+cells                 = config.cells
 
 # fix variable
 start_time            = time.ticks_ms()                     # init time
 up_time               = time.ticks_ms()                     # used to calculate uptime
 pwr                   = []                                  # used to serialise JSON data
+bat                   = []                                  # used to record cells data -- def parsing_bat 
+bats                  = []                                  # used to serialise JSON data -- def check_cells
 loops_no              = 0                                   # used to count no of loops and to calculate % of errors
 errors_no             = 0                                   # used to count no of errors and to calculate %
 trials                = 0                                   # used to improve data reading accuracy -- def parsing_serial
@@ -35,7 +39,7 @@ line_str_array        = []                                  # used to get line s
 bat_events_no         = 0                                   # used to count numbers of battery events
 pwr_events_no         = 0                                   # used to count numbers of power events
 sys_events_no         = 0                                   # used to count numbers of system events
-sw_ver                = "PytesSerial_Esp v0.3.0_20240412"
+sw_ver                = "PytesSerial_Esp v0.4.0_20240501"
 version               = sw_ver
 
 def serial_write(req, size):
@@ -75,7 +79,7 @@ def serial_read(start,stop):
             if uart.any() > 0:
                 line          = uart.readline()
                 line_str      = line.decode('latin-1')
-                
+                time.sleep(0.0025)
                 if line:
                     if start == 'none' or start in line_str:
                         start = 'true'
@@ -222,7 +226,6 @@ def parsing_serial():
                 break
                      
         if data_set == powers:
-            statistics()
             errors='false'
             trials=0
             
@@ -253,9 +256,6 @@ def statistics():
     global sys_soc
     global sys_temp
     global sys_basic_st
-    global json_data
-    global parsing_time
-    
     sys_voltage  = 0
     sys_current  = 0
     sys_soc      = 0
@@ -264,147 +264,492 @@ def statistics():
 
     for power in range (1, powers+1):
         sys_voltage       = sys_voltage + pwr[power-1]['voltage']             # voltage will be the average of all batteries
-        sys_current       = round((sys_current + pwr[power-1]['current']),1)  # current will be sum of all banks          
+        sys_current       = round((sys_current + pwr[power-1]['current']),1)  # current will be sum of all banks
         sys_soc           = sys_soc + pwr[power-1]['soc']                     # soc will be the average of all batteries
         sys_temp          = sys_temp + pwr[power-1]['temperature']            # temperature will be the average of all batteries
-   
-    sys_voltage  = round((sys_voltage / powers), 1)    
-    sys_soc      = int(sys_soc / powers)   
+
+    sys_voltage  = round((sys_voltage / powers), 1)
+    sys_soc      = int(sys_soc / powers)
     sys_basic_st = pwr[0]['basic_st']                                         # status will be the master status
     sys_temp     = round((sys_temp / powers), 1)
-    
-    json_data= {'relay_local_time':TimeStamp,                   
-               'powers' : powers,
-               'voltage': sys_voltage,
-               'current': sys_current,
-               'temperature': sys_temp,
-               'soc': sys_soc,
-               'basic_st': sys_basic_st,
-               'devices':pwr,
-               'serial_stat': {'uptime':uptime,
-                               'loops':loops_no,
-                               'errors': errors_no,
-                               'bat_events_no': bat_events_no,
-                               'pwr_events_no': pwr_events_no,
-                               'sys_events_no': sys_events_no,
-                               'efficiency' :round((1-(errors_no/loops_no))*100,2),
-                               'ser_round_trip':round((time.ticks_ms() - parsing_time)/1000,2)}
-                }  
+
+def json_serialize():
+    global parsing_time
+    global loops_no
+    global errors_no
+    global errors
+    global json_data
+    global bat_events_no
+    global pwr_events_no
+    global sys_events_no
+    global bats
+    try:
+        json_data={'relay_local_time':TimeStamp,
+                   'powers' : powers,
+                   'voltage': sys_voltage,
+                   'current': sys_current,
+                   'temperature': sys_temp,
+                   'soc': sys_soc,
+                   'basic_st': sys_basic_st,
+                   'devices':pwr,
+                   'cells_data':bats,
+                   'serial_stat': {'uptime':uptime,
+                                   'loops':loops_no,
+                                   'errors': errors_no,
+                                   'bat_events_no': bat_events_no,
+                                   'pwr_events_no': pwr_events_no,
+                                   'sys_events_no': sys_events_no,
+                                   'efficiency' :round((1-(errors_no/loops_no))*100,2),
+                                   'ser_round_trip':round(parsing_time/1000,2)}
+                   }
+        # debug only 
+        #with open(dev_name + '_status.json', 'w') as outfile:
+        #    json.dump(json_data, outfile) 
+        #print('...json creation:  ok') 
+
+    except Exception as e:
+        print('...json serialization error: ' + str(e))
+        #pytes_serial_log.error ('JSON SERIALIZATION - error handling message: ' + str(e))
+
+        errors = 'true'
 
 def mqtt_discovery():
     try:
-        #MQTT_auth = None
+        config    = 1
+        max_config= 0
+        msg       = {}
+        
+        #MQTT_auth = None # type: publish.AuthParameter | None
+
         #if len(MQTT_username) > 0:
         #    MQTT_auth = { 'username': MQTT_username, 'password': MQTT_password }
 
-        msg          ={} 
-        config       = 1
-        names        =["current", "voltage" , "temperature", "soc", "status"]
-        ids          =["current", "voltage" , "temperature", "soc", "basic_st"] 
-        dev_cla      =["current", "voltage", "temperature", "battery","None"]
-        stat_cla     =["measurement","measurement","measurement","measurement","None"]
-        unit_of_meas =["A","V","°C", "%","None"]
+        # define system sensors
+        names        =["current",       "voltage" ,     "temperature",  "soc",          "status"]
+        ids          =["current",       "voltage" ,     "temperature",  "soc",          "basic_st"]
+        dev_cla      =["current",       "voltage",      "temperature",  "battery",      None]
+        stat_cla     =["measurement",   "measurement",  "measurement",  "measurement",  None]
+        unit_of_meas =["A",             "V",            "°C",           "%",            None]
 
-        # define system sensors 
-        for n in range(5):
-            state_topic          = "homeassistant/sensor/" + dev_name + "/" + str(config) + "/config"
-            msg ["name"]         = names[n]      
-            msg ["stat_t"]       = "homeassistant/sensor/" + dev_name + "/state"
+        max_config   = max_config + len(ids)
+
+        for n in range(len(ids)):
             msg ["uniq_id"]      = dev_name + "_" + ids[n]
-            if dev_cla[n]  != "None":
+            state_topic          = "homeassistant/sensor/" + dev_name + "/" + msg["uniq_id"] + "/config"
+            msg ["name"]         = names[n]
+            msg ["stat_t"]       = "pytes_serial/" + dev_name + "/" + ids[n]
+            if dev_cla[n]  != None:
                 msg ["dev_cla"]  = dev_cla[n]
-            if stat_cla[n] != "None":
+            if stat_cla[n] != None:
                 msg ["stat_cla"] = stat_cla[n]
-            if unit_of_meas[n] != "None":
+            if unit_of_meas[n] != None:
                 msg ["unit_of_meas"] = unit_of_meas[n]
-                
-            msg ["val_tpl"]      = "{{ value_json." + ids[n]+ "}}"
-            msg ["dev"]          = {"identifiers": [dev_name],"manufacturer": manufacturer,"model": model,"name": dev_name,"sw_version": sw_ver}            
 
+            msg ["val_tpl"]      = "{{ value_json.value }}"
+            msg ["dev"]          = {"identifiers": [dev_name],"manufacturer": manufacturer,"model": model,"name": dev_name,"sw_version": sw_ver}
             message              = json.dumps(msg)
-            
+
             message = bytes(message, 'utf-8')          
             state_topic= bytes(state_topic, 'utf-8')
-            
             client.publish (state_topic, message, qos=0, retain=True)
-
-            b = "...mqtt auto discovery initialization :" + str(round(config/(5*powers+5)*100)) +" %"
+            
+            b = "...mqtt auto discovery - system sensors:" + str(round(config/max_config *100)) +" %"
             print (b, end="\r")
-            
-            msg                  ={}
-            config               = config +1
-            #time.sleep(2)
-            ledtime = time.ticks_ms()
-            while time.ticks_ms() - ledtime < 2000:
-                led.off()
-                time.sleep(0.075)
-                led.on()
-                time.sleep(0.075)
-                led.off()
-            
-        # define individual batteries sensors
-        for power in range (1, powers+1):
-            for n in range(5):
-                state_topic          ="homeassistant/sensor/" + dev_name + "/" + str(config) + "/config"
-                msg ["name"]         = names[n]+"_"+str(power)         
-                msg ["stat_t"]       = "homeassistant/sensor/" + dev_name + "/state"
-                msg ["uniq_id"]      = dev_name + "_" +ids[n]+"_"+str(power)
-                if dev_cla[n] != "None":
-                    msg ["dev_cla"]  = dev_cla[n]
-                if stat_cla[n] != "None":
-                    msg ["stat_cla"]  = stat_cla[n]                    
-                if unit_of_meas[n] != "None":
-                    msg ["unit_of_meas"] = unit_of_meas[n]
-                    
-                msg ["val_tpl"]      = "{{ value_json.devices[" + str(power-1) + "]." + ids[n]+ "}}"
-                msg ["dev"]          = {"identifiers": [dev_name],"manufacturer": manufacturer,"model": model,"name": dev_name,"sw_version": sw_ver}  
 
+            msg                  = {}
+            config               = config +1
+            
+            #blinking led to indicate autodiscovery running process
+            ledtime = time.ticks_ms()
+            while time.ticks_ms() - ledtime < 30:
+                led.off()
+                time.sleep(0.0075)
+                led.on()
+                time.sleep(0.0075)
+                led.off()
+                
+        print("...mqtt auto discovery")
+
+        # define individual batteries sensors
+        names        =["current",       "voltage" ,     "temperature",  "soc",          "status"]
+        ids          =["current",       "voltage" ,     "temperature",  "soc",          "basic_st"]
+        dev_cla      =["current",       "voltage",      "temperature",  "battery",      None]
+        stat_cla     =["measurement",   "measurement",  "measurement",  "measurement",  None]
+        unit_of_meas =["A",             "V",            "°C",           "%",            None]
+
+        max_config   = max_config + powers*len(ids)
+
+        for power in range (1, powers+1):
+            for n in range(len(ids)):
+                msg ["uniq_id"]      = dev_name + "_" + ids[n] +"_" + str(power)
+                state_topic          = "homeassistant/sensor/" + dev_name + "/" + msg["uniq_id"] + "/config"
+                msg ["name"]         = names[n]+"_"+str(power)
+                msg ["stat_t"]       = "pytes_serial/" + dev_name + "/" + str(power-1) + "/" + ids[n]
+                if dev_cla[n] != None:
+                    msg ["dev_cla"]  = dev_cla[n]
+                if stat_cla[n] != None:
+                    msg ["stat_cla"]  = stat_cla[n]
+                if unit_of_meas[n] != None:
+                    msg ["unit_of_meas"] = unit_of_meas[n]
+
+                msg ["val_tpl"]      = "{{ value_json.value }}"
+                msg ["dev"]          = {"identifiers": [dev_name],"manufacturer": manufacturer,"model": model,"name": dev_name,"sw_version": sw_ver}
                 message              = json.dumps(msg)
 
-                message = bytes(message, 'utf-8')
+                message = bytes(message, 'utf-8')          
                 state_topic= bytes(state_topic, 'utf-8')
-                
                 client.publish (state_topic, message, qos=0, retain=True)
-
-                b = "...mqtt auto discovery initialization :" + str(round(config/(5*powers+5)*100)) +" %"
+            
+                b = "...mqtt auto discovery - battery sensors:" + str(round(config/max_config *100)) +" %"
                 print (b, end="\r")
-                
+
                 msg                  ={}
-                config               = config + 1 
-                #time.sleep(2)
+                config               = config +1
+
+                #blinking led to indicate autodiscovery running process
                 ledtime = time.ticks_ms()
-                while time.ticks_ms() - ledtime < 2000:
+                while time.ticks_ms() - ledtime < 30:
                     led.off()
-                    time.sleep(0.075)
+                    time.sleep(0.0075)
                     led.on()
-                    time.sleep(0.075)
+                    time.sleep(0.0075)
                     led.off()
-                
-        print("...mqtt auto discovery initialization completed")
-        
+                    
+        print("...mqtt auto discovery")
+
+        # define individual cells sensors
+        if cells_monitoring == 'true':
+
+            names        =["voltage",       "temperature",  "soc",          "status",   "volt_st",  "curr_st",  "temp_st"]
+            ids          =["voltage",       "temperature",  "soc",          "basic_st", "volt_st",  "curr_st",  "temp_st"]
+            dev_cla      =["voltage",       "temperature",  "battery",      None,       None,       None,       None]
+            stat_cla     =["measurement",   "measurement",  "measurement",  None,       None,       None,       None]
+            unit_of_meas =["V",             "°C",           "%",            None,       None,       None,       None]
+
+            max_config   = max_config + powers*len(ids)*cells
+
+            for power in range (1, powers+1):
+                for n in range(len(ids)):
+                    for cell in range(1, cells+1):
+                        if cell < 10:
+                            cell_no ="0" + str(cell)
+                        else:
+                            cell_no ="" + str(cell)
+
+                        msg ["uniq_id"]      = dev_name + "_" + ids[n] + "_" + str(power) + cell_no
+                        state_topic          = "homeassistant/sensor/" + dev_name + "/" + msg["uniq_id"] + "/config"
+                        msg ["name"]         = names[n]+"_"+str(power) + cell_no
+                        msg ["stat_t"]       = "pytes_serial/" + dev_name + "/" + str(power-1) + "/cells/" + str(cell-1) + "/" + ids[n]
+                        if dev_cla[n] != None:
+                            msg ["dev_cla"]  = dev_cla[n]
+                        if stat_cla[n] != None:
+                            msg ["stat_cla"]  = stat_cla[n]
+                        if unit_of_meas[n] != None:
+                            msg ["unit_of_meas"] = unit_of_meas[n]
+
+                        msg ["val_tpl"]      = "{{ value_json.value }}"
+                        msg ["dev"]          = {"identifiers": [dev_name+"_cells"],"manufacturer": manufacturer,"model": model,"name": dev_name+"_cells","sw_version": sw_ver}
+                        message              = json.dumps(msg)
+
+                        message = bytes(message, 'utf-8')          
+                        state_topic= bytes(state_topic, 'utf-8')
+                        client.publish (state_topic, message, qos=0, retain=True)
+            
+                        b = "...mqtt auto discovery - cell sensors:" + str(round(config/max_config *100)) +" %"
+                        print (b, end="\r")
+
+                        msg                  ={}
+                        config               = config +1
+                        
+                        #blinking led to indicate autodiscovery running process
+                        ledtime = time.ticks_ms()
+                        while time.ticks_ms() - ledtime < 30:
+                            led.off()
+                            time.sleep(0.0075)
+                            led.on()
+                            time.sleep(0.0075)
+                            led.off()
+                            
+            print("...mqtt auto discovery")
+            
+            # define individual cells sensors -- statistics
+            names        =["voltage_delta", "voltage_min",  "voltage_max",  "temperature_delta",    "temperature_min",  "temperature_max"]
+            ids          =["voltage_delta", "voltage_min",  "voltage_max",  "temperature_delta",    "temperature_min",  "temperature_max"]
+            dev_cla      =["voltage",       "voltage",      "voltage",      "temperature",          "temperature",      "temperature"]
+            stat_cla     =["measurement",   "measurement",  "measurement",  "measurement",          "measurement",      "measurement"]
+            unit_of_meas =["V",             "V",            "V",            "°C",                   "°C",               "°C"]
+
+            max_config   = max_config + powers*len(ids)
+
+            for power in range (1, powers+1):
+                for n in range(len(ids)):
+                    msg ["uniq_id"]      = dev_name + "_" + ids[n] + "_" + str(power)
+                    state_topic          = "homeassistant/sensor/" + dev_name + "/" + msg["uniq_id"] + "/config"
+                    msg ["name"]         = names[n]+"_"+str(power)
+                    msg ["stat_t"]       = "pytes_serial/" + dev_name + "/" + str(power-1) + "/cells/" + ids[n]
+                    if dev_cla[n] != "None":
+                        msg ["dev_cla"]  = dev_cla[n]
+                    if stat_cla[n] != "None":
+                        msg ["stat_cla"]  = stat_cla[n]
+                    if unit_of_meas[n] != "None":
+                        msg ["unit_of_meas"] = unit_of_meas[n]
+
+                    msg ["val_tpl"]      = "{{ value_json.value }}"
+                    msg ["dev"]          = {"identifiers": [dev_name+"_cells"],"manufacturer": manufacturer,"model": model,"name": dev_name+"_cells","sw_version": sw_ver}
+                    message              = json.dumps(msg)
+
+                    message = bytes(message, 'utf-8')          
+                    state_topic= bytes(state_topic, 'utf-8')
+                    client.publish (state_topic, message, qos=0, retain=True)
+            
+                    b = "...mqtt auto discovery - statistics sensors:" + str(round(config/max_config *100)) +" %"
+                    print (b, end="\r")
+
+                    msg                  ={}
+                    config               = config +1
+                    
+                    #blinking led to indicate autodiscovery running process
+                    ledtime = time.ticks_ms()
+                    while time.ticks_ms() - ledtime < 30:
+                        led.off()
+                        time.sleep(0.0075)
+                        led.on()
+                        time.sleep(0.0075)
+                        led.off()
+                        
+        print("...mqtt auto discovery")
+
     except Exception as e:
         print('...mqtt_discovery error: ' + str(e))
-        
+        #pytes_serial_log.warning ('MQTT DISCOVERY - error handling message: '  + str(e))
+
 def mqtt_publish():
     try:
-        #MQTT_auth = None
+        #MQTT_auth = None # type: publish.AuthParameter | None
         #if len(MQTT_username) >0:
         #    MQTT_auth = { 'username': MQTT_username, 'password': MQTT_password }
-        
-        state_topic = "homeassistant/sensor/" + dev_name + "/state"
-        
-        message     = json.dumps(json_data)
-        
-        message = bytes(message, 'utf-8')
-        state_topic= bytes(state_topic, 'utf-8')
+
+        # Publish system topics
+        for key, value in json_data.items():
+            # We will publish these later
+            if key in ["devices", "cells_data"]:
+                continue
+
+            state_topic = "pytes_serial/" + dev_name + "/" + key
+            if isinstance(value, dict) or isinstance(value, list):
+                message = json.dumps(value)
+            else:
+                message = json.dumps({'value': value})
                 
-        client.publish (state_topic, message, qos=0, retain=True)
-        
+            message = bytes(message, 'utf-8')          
+            state_topic= bytes(state_topic, 'utf-8')
+            client.publish (state_topic, message, qos=0, retain=True)
+
+        # Publish device topics
+        for device in json_data["devices"]:
+            device_idx = str(device["power"] - 1)
+
+            for key, value in device.items():
+                # Do not publish these
+                if key in ["power"]:
+                    continue
+
+                state_topic = "pytes_serial/" + dev_name + "/" + device_idx + "/" + key
+                if isinstance(value, dict) or isinstance(value, list):
+                    message = json.dumps(value)
+                else:
+                    message = json.dumps({'value': value})
+                    
+                message = bytes(message, 'utf-8')          
+                state_topic= bytes(state_topic, 'utf-8')
+                client.publish (state_topic, message, qos=0, retain=True)
+
+        if cells_monitoring == 'true':
+            for device in json_data["cells_data"]:
+                device_idx = str(device["power"] - 1)
+
+                # Publish cell statistics
+                for key, value in device.items():
+                    # Do not publish these
+                    if key in ["power", "cells"]:
+                        continue
+
+                    state_topic = "pytes_serial/" + dev_name + "/" + device_idx + "/cells/" + key
+                    if isinstance(value, dict) or isinstance(value, list):
+                        message = json.dumps(value)
+                    else:
+                        message = json.dumps({'value': value})
+                        
+                    message = bytes(message, 'utf-8')          
+                    state_topic= bytes(state_topic, 'utf-8')
+                    client.publish (state_topic, message, qos=0, retain=True)
+
+                # Publish cell topics
+                for cell in device["cells"]:
+                    cell_idx = str(cell["cell"] - 1)
+
+                    for key, value in cell.items():
+                        # Do not publish these
+                        if key in ["power", "cell"]:
+                            continue
+
+                        state_topic = "pytes_serial/" + dev_name + "/" + device_idx + "/cells/" + cell_idx + "/" + key
+                        if isinstance(value, dict) or isinstance(value, list):
+                            message = json.dumps(value)
+                        else:
+                            message = json.dumps({'value': value})
+                            
+                        message = bytes(message, 'utf-8')          
+                        state_topic= bytes(state_topic, 'utf-8')
+                        client.publish (state_topic, message, qos=0, retain=True)
+
         print ('...mqtt publish  : ok')
-        
+
     except Exception as e:
         print ('...mqtt publish error: ' + str(e))
+        #pytes_serial_log.warning ('MQTT PUBLISH - error handling message: ' + str(e))
+        
+def parsing_bat(power):
+    global line_str_array
+    global bat
+    bat = []
 
+    try:
+        req  = ('bat '+ str(power))
+        size = 1000
+        write_return = serial_write(req,size)
+
+        if write_return != 'true':
+            return "false"
+
+        read_return = serial_read('Battery','Command completed')
+
+        if read_return != 'true' or not line_str_array:
+            return "false"
+
+        cell_idx        = -1
+        volt_idx        = -1
+        curr_idx        = -1
+        temp_idx        = -1
+        base_st_idx     = -1
+        volt_st_idx     = -1
+        curr_st_idx     = -1
+        temp_st_idx     = -1
+        soc_idx         = -1
+        coulomb_idx     = -1
+        is_pylontech    = False
+
+        for i, line_str in enumerate(line_str_array):
+            # Last line is command completed message
+            if i == len(line_str_array) - 1:
+                break
+
+            # First line is table header
+            elif i == 0:
+                #line = re.split(r'\s{2,}', line_str.strip()) # type: list[str] # Each column is delimited by at least 2 spaces
+                line = re.compile(r'\s\s+').split(line_str.strip())
+                for j, l in enumerate(line):
+                    if l == 'Battery':
+                        cell_idx = j
+                    elif l == 'Volt':
+                        volt_idx = j
+                    elif l == 'Curr':
+                        curr_idx = j
+                    elif l == 'Tempr':
+                        temp_idx = j
+                    elif l == 'Base State':
+                        base_st_idx = j
+                    elif l == 'Volt. State':
+                        volt_st_idx = j
+                    elif l == 'Curr. State':
+                        curr_st_idx = j
+                    elif l == 'Temp. State':
+                        temp_st_idx = j
+                    elif l == 'SOC':
+                        soc_idx = j
+                    elif l == 'Coulomb':
+                        coulomb_idx = j
+
+                # Workaround for Pytes firmware missing SOC column in the header
+                if soc_idx == -1 and coulomb_idx != -1:
+                    soc_idx = coulomb_idx
+                    coulomb_idx = coulomb_idx + 1
+
+            # All the other lines are cell data
+            else:
+                #line = re.split(r'\s{2,}', line_str.strip()) # Each column is delimited by at least 2 spaces
+                line = re.compile(r'\s\s+').split(line_str.strip())
+                cell_data = {} # type: dict[str, int|float|str]
+
+                cell_data['power']              = power
+
+                if cell_idx != -1:
+                    cell_data['cell']           = int(line[cell_idx]) + 1
+                if volt_idx != -1:
+                    cell_data['voltage']        = int(line[volt_idx]) / 1000            # V
+                if curr_idx != -1:
+                    cell_data['current']        = int(line[curr_idx]) / 1000            # A
+                if temp_idx != -1:
+                    cell_data['temperature']    = int(line[temp_idx]) / 1000            # deg C
+                if base_st_idx != -1:
+                    cell_data['basic_st']       = line[base_st_idx]
+                if volt_st_idx != -1:
+                    cell_data['volt_st']        = line[volt_st_idx]
+                if curr_st_idx != -1:
+                    cell_data['curr_st']        = line[curr_st_idx]
+                if temp_st_idx != -1:
+                    cell_data['temp_st']        = line[temp_st_idx]
+                if soc_idx != -1:
+                    cell_data['soc']            = int(line[soc_idx][:-1])               # %
+                if coulomb_idx != -1:
+                    cell_data['coulomb']        = int(line[coulomb_idx][:-4]) / 1000    # Ah
+
+                bat.append(cell_data)
+
+        return "true"
+
+    except Exception as e:
+        print ('PARSING BAT - error handling message: ' + str(e))
+
+def check_cells():
+    global bats
+    try:
+        for power in range (1, powers+1):
+            if parsing_bat(power)=="true":
+
+               # statistics -- calculate min,mix of cells data of each power
+                output = {"voltage" : [float('inf'),float('-inf')],
+                          "temperature" : [float('inf'),float('-inf')]
+                          }
+                for item in bat:
+                    for each in output.keys():
+                        if item[each]<output[each][0]:
+                            output[each][0] = item[each]
+
+                        if item[each]>output[each][1]:
+                            output[each][1] = item[each]
+
+                stat = {
+                    'power':power,
+                    'voltage_delta':round(output['voltage'][1] - output['voltage'][0],3),
+                    'voltage_min':output['voltage'][0],
+                    'voltage_max':output['voltage'][1],
+                    'temperature_delta': round(output['temperature'][1] - output['temperature'][0],3),
+                    'temperature_min':output['temperature'][0],
+                    'temperature_max':output['temperature'][1],
+                    'cells':bat
+                }
+
+                bats.append(stat)
+
+            else:
+                pass
+                
+        print ('...check cells   : ok')
+        
+    except Exception as e:
+        print ('CHECK CELLS - error handling message: ' + str(e))
+        
 def reboot_machine():
     # blink LED 20s
     ledtime = time.ticks_ms()
@@ -509,15 +854,33 @@ while True:
         if errors == 'false':
             parsing_time = time.ticks_ms()
             parsing_serial()
+            parsing_time = time.ticks_ms()-parsing_time
+            #print(round(parsing_time/1000, 2)) #debug
+        
+        if cells_monitoring == 'true' and errors == 'false':
+            check_cells_time = time.ticks_ms()
+            check_cells()
+            check_cells_time = (time.ticks_ms() - check_cells_time)
+            #print(round(check_cells_time/1000, 2)) #debug
+            parsing_time     = parsing_time + check_cells_time
             
         if errors == 'false':
-            mqtt_publish()
+            statistics()
             
+        if errors == 'false':
+            json_serialize()
+            
+        if errors == 'false':
+            mqtt_publish_time = time.ticks_ms()
+            mqtt_publish()
+            mqtt_publish_time = (time.ticks_ms() - mqtt_publish_time)
+            #print(round(mqtt_publish_time/1000, 2)) #debug
+        
         if errors != 'false' :
             errors_no = errors_no + 1
             
         print ('...serial stat   :', 'loops:' , loops_no, 'errors:', errors_no, 'efficiency:', round((1-(errors_no/loops_no))*100, 2))
-        print ('...serial stat   :', 'parsing round-trip:' , round((time.ticks_ms() - parsing_time)/1000, 2)) 
+        print ('...serial stat   :', 'parsing round-trip:' , round((parsing_time)/1000, 2)) 
         print ('------------------------------------------------------')
         
         if auto_reboot != 0 and auto_reboot < uptime:
@@ -526,6 +889,7 @@ while True:
             
         #clear variables
         pwr        = []
+        bats       = []       
         errors     = 'false'
         trials     = 0
         led.off()
