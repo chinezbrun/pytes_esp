@@ -39,7 +39,7 @@ line_str_array        = []                                  # used to get line s
 bat_events_no         = 0                                   # used to count numbers of battery events
 pwr_events_no         = 0                                   # used to count numbers of power events
 sys_events_no         = 0                                   # used to count numbers of system events
-sw_ver                = "PytesSerial_Esp v0.4.0_20240501"
+sw_ver                = "PytesSerial_Esp v0.4.0_20240503"
 version               = sw_ver
 
 def serial_write(req, size):
@@ -279,11 +279,13 @@ def json_serialize():
     global errors_no
     global errors
     global json_data
+    global json_data_old    
     global bat_events_no
     global pwr_events_no
     global sys_events_no
     global bats
     try:
+        json_data_old = json_data        
         json_data={'relay_local_time':TimeStamp,
                    'powers' : powers,
                    'voltage': sys_voltage,
@@ -487,11 +489,11 @@ def mqtt_discovery():
                     state_topic          = "homeassistant/sensor/" + dev_name + "/" + msg["uniq_id"] + "/config"
                     msg ["name"]         = names[n]+"_"+str(power)
                     msg ["stat_t"]       = "pytes_serial/" + dev_name + "/" + str(power-1) + "/cells/" + ids[n]
-                    if dev_cla[n] != "None":
+                    if dev_cla[n] != None:
                         msg ["dev_cla"]  = dev_cla[n]
-                    if stat_cla[n] != "None":
+                    if stat_cla[n] != None:
                         msg ["stat_cla"]  = stat_cla[n]
-                    if unit_of_meas[n] != "None":
+                    if unit_of_meas[n] != None:
                         msg ["unit_of_meas"] = unit_of_meas[n]
 
                     msg ["val_tpl"]      = "{{ value_json.value }}"
@@ -534,7 +536,11 @@ def mqtt_publish():
             # We will publish these later
             if key in ["devices", "cells_data"]:
                 continue
-
+            
+            # If the value was published before, skip it
+            if json_data_old and value == json_data_old[key]:
+                continue
+            
             state_topic = "pytes_serial/" + dev_name + "/" + key
             if isinstance(value, dict) or isinstance(value, list):
                 message = json.dumps(value)
@@ -552,6 +558,15 @@ def mqtt_publish():
             for key, value in device.items():
                 # Do not publish these
                 if key in ["power"]:
+                    continue
+                
+                # If the value was published before, skip it
+                if (
+                    json_data_old and
+                    len(json_data["devices"]) == powers and
+                    len(json_data_old["devices"]) == powers and
+                    value == json_data_old["devices"][device["power"] - 1][key]
+                ):
                     continue
 
                 state_topic = "pytes_serial/" + dev_name + "/" + device_idx + "/" + key
@@ -574,6 +589,15 @@ def mqtt_publish():
                     if key in ["power", "cells"]:
                         continue
 
+                    # If the value was published before, skip it
+                    if (
+                        json_data_old and
+                        len(json_data["cells_data"]) == powers and
+                        len(json_data_old["cells_data"]) == powers and
+                        value == json_data_old["cells_data"][device["power"] - 1][key]
+                    ):
+                        continue
+
                     state_topic = "pytes_serial/" + dev_name + "/" + device_idx + "/cells/" + key
                     if isinstance(value, dict) or isinstance(value, list):
                         message = json.dumps(value)
@@ -591,6 +615,17 @@ def mqtt_publish():
                     for key, value in cell.items():
                         # Do not publish these
                         if key in ["power", "cell"]:
+                            continue
+
+                        # If the value was published before, skip it
+                        if(
+                            json_data_old and
+                            len(json_data["cells_data"]) == powers and
+                            len(json_data_old["cells_data"]) == powers and
+                            len(json_data["cells_data"][device["power"] - 1]["cells"]) == cells and
+                            len(json_data_old["cells_data"][device["power"] - 1]["cells"]) == cells and
+                            value == json_data_old["cells_data"][device["power"] - 1]["cells"][cell["cell"] - 1][key]
+                        ):
                             continue
 
                         state_topic = "pytes_serial/" + dev_name + "/" + device_idx + "/cells/" + cell_idx + "/" + key
@@ -834,6 +869,8 @@ if init=='false':
 
 led.off()
 print('...program initialisation completed starting main loop')
+
+json_data = {}
 
 # starting main loop
 while True:
