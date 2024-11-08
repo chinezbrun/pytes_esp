@@ -19,5 +19,6 @@ manufacturer  = "PYTES Energy Co.Ltd"  # default = PYTES Energy Co.Ltd -- manufa
 model         = "E-BOX-48100R"         # default = E-BOX-48100R        -- battery model
 
 # cells monitoring
-cells_monitoring       = "false"       # default = false -- set to 'true' to have cells monitoring active
-cells                  = 16            # default = 16 -- 16 for Pytes, 15 for Pylontech
+cells                  = 16            # default = 16       -- 16 for Pytes, 15 for Pylontech
+cells_monitoring       = "false"       # default = false    -- set to 'true' to have cells monitoring active     
+monitoring_level       = "medium"      # default = 'medium' -- set to 'low' [shows:voltage] set to 'medium' [shows: voltage, temperature, status and statistics], set to 'high' shows all cells parameters [not recomanded for more than 4 batteries in bank due to high amount of data]
