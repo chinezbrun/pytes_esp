@@ -10,7 +10,7 @@ Program reads serial port with a specific freqvency, parsing the data and send i
 Program has build-in integration with Home Assisant where the following sensors will be automatic created for each battery:
   - "pytes_esp_current", "pytes_esp_voltage", "pytes_esp_temperature", "pytes_esp_soc", "pytes_esp_status"
    the battery number is embeded at the end of each sensor (i.e pytes_esp_current_1, pytes_esp_current_2...)
-  - when cells_monitoring = 'true' in config.py an additional device will be created in Home Assistant with sufix "_cells" with all associated sensors. The battery and cell number is embeded at the end of each sensor ( i.e. voltage_102 means voltage for battery 1 cell 2)
+  - when cells_monitoring = 'true' in config.py an additional device will be created in Home Assistant with sufix "_cells" with all associated sensors. The battery and cell number is embeded at the end of each sensor ( i.e. voltage_102 means voltage for battery 1 cell 2). Under monitoring_level, three levels of details can be selected. 
 
 If more sensors will be needed, they can be added manually as per Home Assistant documentation [MQTT sensor](https://www.home-assistant.io/integrations/sensor.mqtt/) 
 and the example in docs folder [here](/docs/home_assistant_add_sensor.txt).
