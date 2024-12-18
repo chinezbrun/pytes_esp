@@ -41,7 +41,7 @@ bat_events_no         = 0                                   # used to count numb
 pwr_events_no         = 0                                   # used to count numbers of power events
 sys_events_no         = 0                                   # used to count numbers of system events
 debug                 = 'false'                              # used for debug purpose only
-sw_ver                = 'PytesSerial_Esp v0.5.0_20241107'
+sw_ver                = 'PytesSerial_Esp v0.5.1_20241218'
 version               = sw_ver
 
 if reading_freq < 10  : reading_freq = 10
@@ -919,8 +919,13 @@ while True:
         
         uptime = round((time.ticks_ms()- up_time)/86400000, 3)
         print ('serial uptime   :', uptime)
-        start_time = time.ticks_ms()
-
+        start_time          = time.ticks_ms()
+        parsing_time        = 0
+        check_cells_time    = 0
+        statistics_time     = 0 
+        json_serialize_time = 0
+        mqtt_publish_time   = 0
+        
         if errors == 'false':
             parsing_time = time.ticks_ms()
             parsing_serial()
