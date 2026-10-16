@@ -10,27 +10,28 @@ import ntptime                        # used for sync time
 import re
 
 # imported variables
-reading_freq          = config.reading_freq
-auto_reboot           = config.auto_reboot
-wlan_ssid             = config.wlan_ssid
-wlan_pass             = config.wlan_pass
-mqtt_broker           = config.mqtt_broker
-mqtt_port             = config.mqtt_port
-mqtt_user             = config.mqtt_user
-mqtt_pass             = config.mqtt_pass
-powers                = config.powers
-dev_name              = config.dev_name
-manufacturer          = config.manufacturer
-model                 = config.model 
-cells_monitoring      = config.cells_monitoring
-cells_mon_level       = config.monitoring_level
-cells                 = config.cells
+reading_freq                 = config.reading_freq
+auto_reboot                  = config.auto_reboot
+wlan_ssid                    = config.wlan_ssid
+wlan_pass                    = config.wlan_pass
+mqtt_broker                  = config.mqtt_broker
+mqtt_port                    = config.mqtt_port
+mqtt_user                    = config.mqtt_user
+mqtt_pass                    = config.mqtt_pass
+powers                       = config.powers
+dev_name                     = config.dev_name
+manufacturer                 = config.manufacturer
+model                        = config.model
+cells_monitoring             = config.cells_monitoring
+cells_mon_level              = config.monitoring_level
+cells                        = config.cells
+mqtt_availability_threshold  = config.mqtt_availability_threshold
 
-# fix variable
+# fixed variables
 start_time            = time.ticks_ms()                     # init time
 up_time               = time.ticks_ms()                     # used to calculate uptime
 pwr                   = []                                  # used to serialise JSON data
-bat                   = []                                  # used to record cells data -- def parsing_bat 
+bat                   = []                                  # used to record cells data -- def parsing_bat
 bats                  = []                                  # used to serialise JSON data -- def check_cells
 loops_no              = 0                                   # used to count no of loops and to calculate % of errors
 errors_no             = 0                                   # used to count no of errors and to calculate %
@@ -39,14 +40,15 @@ uart_failures_no      = 0                                   # used to count UART
 trials                = 0                                   # used to improve data reading accuracy -- def parsing_serial
 errors                = 'false'                             # used to flag errors
 line_str_array        = []                                  # used to get line strings from serial
-bat_events_no         = 0                                   # used to count numbers of battery events
-pwr_events_no         = 0                                   # used to count numbers of power events
-sys_events_no         = 0                                   # used to count numbers of system events
 debug                 = 'false'                              # used for debug purpose only
 console_dump          = 'true'                             # used to show raw battery/cell values
 END_MARKERS           = ["PYTES>", "PYTES_debug>", "pylon>", "pylon_debug>"] # used for end of transmission
-sw_ver                = 'PytesSerial_Esp v0.6.0_20250726'
+sw_ver                = 'PytesSerial_Esp v1.0.0_20261016'
 version               = sw_ver
+mqtt_availability_topic  = "pytes_serial/" + dev_name + "/availability"
+mqtt_availability_state  = None
+mqtt_failed_cycles       = 0
+mqtt_retry_full_update   = False
 
 if reading_freq < 10  : reading_freq = 10
 
@@ -64,32 +66,53 @@ def parse_number(s):
 
 def serial_write(req, size):
     try:
+
         loop_time = time.ticks_ms()
+        recovery_used = False
+        resend_used = False
 
         bytes_req = bytes(str(req), 'latin-1')
         uart.write(bytes_req + b'\n')
-        time.sleep(0.1)
 
         while True:
-            if uart.any() > size:
-                if debug=='true':
-                    print('[DEBUG] Serial write         : ok, buffer: ' + str(uart.any()) + ', time: ' + str(round((time.ticks_ms() - loop_time) / 1000, 2)) + ' s')
-                return "true"            
+            elapsed_ms = time.ticks_diff(time.ticks_ms(), loop_time)
+            buffer = uart.any()
 
-            elif (time.ticks_ms() - loop_time)/1000 > 1:
+            if buffer > size:
+                if debug=='true':
+                    print('[DEBUG] Serial write         : ok, buffer: ' + str(buffer) + ', time: ' + str(round(elapsed_ms / 1000, 2)) + ' s')
+                return "true"
+
+            # UART recovery timing:
+            # normal response window: 0.5 s
+            # full resend: >0.8 s when the buffer is still small
+            # final timeout after resend: >1.2 s
+            if resend_used and elapsed_ms > 1200:
                 return "false"
 
-            elif uart.any() < 100 and (time.ticks_ms() - loop_time)/1000 > 0.4:
+            if (not resend_used) and elapsed_ms > 800 and buffer < 100:
+                if not recovery_used:
+                    recovery_used = True
+
+                # Discard the incomplete response before retransmitting
+                if uart.any():
+                    uart.read()
+
                 uart.write(bytes_req + b'\n')
-                time.sleep(0.25)
-                
-            else:
+                resend_used = True
+
+            elif not recovery_used and elapsed_ms > 500:
+                recovery_used = True
                 uart.write(b'\n')
-                time.sleep(0.1)            
- 
+
+            elif (not resend_used) and elapsed_ms > 1200:
+                return "false"
+
+            time.sleep_ms(5)
+
     except Exception as e:
         print('[ERROR] Serial write         : ' + str(e))
-        
+
 def serial_read(start, stop):
     try:
         global line_str_array
@@ -129,8 +152,12 @@ def serial_read(start, stop):
 
             now = time.ticks_ms()
 
+            # Drain mode: wait until UART stays quiet for idle_timeout.
             if start == 'none' and stop == 'none' and available == 0:
-                break
+                if last_data_tick is None:
+                    last_data_tick = now
+                elif time.ticks_diff(now, last_data_tick) >= idle_timeout:
+                    break
 
             if last_data_tick is not None:
                 if time.ticks_diff(now, last_data_tick) >= idle_timeout:
@@ -171,166 +198,199 @@ def parsing_serial():
         global trials
         global uart_retries_no
         global uart_failures_no
-        global pwr                                                                                 
-        volt_st      = None                                                                        
-        current_st   = None   
-        temp_st      = None     
-        coul_st      = None
-        soh_st       = None
-        heater_st    = None
-        bat_events   = None
-        power_events = None
-        sys_events   = None
+        global pwr
 
         data_set           = 0
         pwr                = []
-        #line_str_array_bak = []
-        
-        for power in range (1, powers + 1):
-            req       = ('pwr '+ str(power))
-            start     = ('Power  '+ str(power))
-            size      = 800
-            rw_trials = 0
-            
-            while True:
-                write_return = serial_write(req,size)
-                if write_return == 'true':
-                    read_return = serial_read(start, END_MARKERS)
+        line_str_array_bak = []
 
-                    if line_str_array and read_return == 'true':
+        # Consolidated PWR command: one response contains all battery modules.
+        req       = 'pwr'
+        start     = 'Power Volt'
+        size      = 800
+        rw_trials = 0
 
-                        rw_trials = 0
+        while True:
+            write_return = serial_write(req, size)
+
+            if write_return == 'true':
+                read_return = serial_read(start, END_MARKERS)
+
+                if line_str_array and read_return == 'true':
+                    rw_trials = 0
+                    break
+
+            rw_trials = rw_trials + 1
+            buffer = uart.any()
+
+            if rw_trials <= 5:
+                uart_retries_no = uart_retries_no + 1
+                serial_read('none', 'none')
+
+                if debug == 'true':
+                    print(
+                        '[DEBUG] Serial parsing       : pwr:',
+                        'rw_trial:', rw_trials,
+                        ', in_buffer:', buffer,
+                        '<', size
+                    )
+
+                line_str_array = []
+
+            else:
+                uart_failures_no = uart_failures_no + 1
+                errors = 'true'
+                print('[WARN ] Serial write         : timeout, skip set')
+                return
+
+        line_str_array_bak = line_str_array
+
+        power_idx    = -1
+        volt_idx     = -1
+        curr_idx     = -1
+        temp_idx     = -1
+        basic_st_idx = -1
+        volt_st_idx  = -1
+        curr_st_idx  = -1
+        temp_st_idx  = -1
+        soc_idx      = -1
+        header_valid = False
+
+        for i, line_str in enumerate(line_str_array):
+            if line_str.strip().startswith('Command completed'):
+                break
+
+            if i == 0:
+                # PWR headers are separated by variable whitespace.
+                line = line_str.strip().split()
+
+                for j, value in enumerate(line):
+                    if value == 'Power':
+                        power_idx = j
+                    elif value == 'Volt':
+                        volt_idx = j
+                    elif value == 'Curr':
+                        curr_idx = j
+                    elif value == 'Tempr':
+                        temp_idx = j
+                    elif value == 'Base.St':
+                        basic_st_idx = j
+                    elif value == 'Volt.St':
+                        volt_st_idx = j
+                    elif value == 'Curr.St':
+                        curr_st_idx = j
+                    elif value == 'Temp.St':
+                        temp_st_idx = j
+                    elif value == 'Coulomb':
+                        soc_idx = j
+
+                if (
+                    power_idx != -1
+                    and volt_idx != -1
+                    and curr_idx != -1
+                    and temp_idx != -1
+                    and basic_st_idx != -1
+                    and volt_st_idx != -1
+                    and curr_st_idx != -1
+                    and temp_st_idx != -1
+                    and soc_idx != -1
+                ):
+                    header_valid = True
+                else:
+                    break
+
+            else:
+                if header_valid != True:
+                    break
+
+                line = line_str.strip().split()
+
+                if not line or not line[0].isdigit():
+                    continue
+
+                try:
+                    power = int(line[power_idx])
+
+                    if power > powers:
+                        continue
+
+                    if power != data_set + 1:
                         break
 
-                rw_trials = rw_trials + 1
-                buffer = uart.any()
+                    if line[basic_st_idx] == 'Absent':
+                        break
 
-                if rw_trials <= 5:
-                    uart_retries_no = uart_retries_no + 1
-                    serial_read('none', 'none')
+                    voltage = round(int(line[volt_idx]) / 1000, 2)
+                    current = round(int(line[curr_idx]) / 1000, 2)
+                    temp    = round(int(line[temp_idx]) / 1000, 1)
+                    soc     = int(line[soc_idx].replace('%', ''))
 
-                    if debug=='true':
-                        print(
-                            '[DEBUG] Serial parsing       : power', str(power) + ':',
-                            'rw_trial:', rw_trials,
-                            ', in_buffer:', buffer,
-                            '<', size
-                        )
+                except (ValueError, IndexError) as e:
+                    if debug == 'true':
+                        print('[DEBUG] Serial parsing       : pwr invalid data:', str(e))
+                    break
 
-                    line_str_array = []
+                basic_st   = line[basic_st_idx]
+                volt_st    = line[volt_st_idx]
+                current_st = line[curr_st_idx]
+                temp_st    = line[temp_st_idx]
 
-                else:
-                    uart_failures_no = uart_failures_no + 1
-                    errors = 'true'
-                    print('[WARN ] Serial write         : timeout, skip set')
-                    return
+                if console_dump == 'true':
+                    print('power           :', power)
+                    print('voltage         :', voltage)
+                    print('current         :', current)
+                    print('temperature     :', temp)
+                    print('soc [%]         :', soc)
+                    print('basic_st        :', basic_st)
+                    print('volt_st         :', volt_st)
+                    print('current_st      :', current_st)
+                    print('temp_st         :', temp_st)
+                    print('---------------------------')
 
-            decode             = 'false'
-            #if debug=='true': line_str_array_bak = line_str_array # for debug purpose only  
+                pwr_array = {
+                    'power': power,
+                    'voltage': voltage,
+                    'current': current,
+                    'temperature': temp,
+                    'soc': soc,
+                    'basic_st': basic_st,
+                    'volt_st': volt_st,
+                    'current_st': current_st,
+                    'temp_st': temp_st
+                }
 
-            for line_str in line_str_array:              
-                if start in line_str:                             # search for Power X and mark beginning of the block                        
-                    decode ='true'
-                    
-                #parsing data   
-                if decode =='true':
-                    if line_str[1:18] == 'Voltage         :': voltage      = round(int(line_str[19:27])/1000, 2)
-                    if line_str[1:18] == 'Current         :': current      = round(int(line_str[19:27])/1000, 2)
-                    if line_str[1:18] == 'Temperature     :': temp         = round(int(line_str[19:27])/1000, 1)
-                    if line_str[1:18] == 'Coulomb         :': soc          = int(line_str[19:27])
-                    if line_str[1:18] == 'Basic Status    :': basic_st     = line_str[19:27]        
-                    if line_str[1:18] == 'Volt Status     :': volt_st      = line_str[19:27]      
-                    if line_str[1:18] == 'Current Status  :': current_st   = line_str[19:27]    
-                    if line_str[1:18] == 'Tmpr. Status    :': temp_st      = line_str[19:27]     
-                    if line_str[1:18] == 'Coul. Status    :': coul_st      = line_str[19:27]
-                    if line_str[1:18] == 'Soh. Status     :': soh_st       = line_str[19:27]
-                    if line_str[1:18] == 'Heater Status   :': heater_st    = line_str[19:27]
-                    if line_str[1:18] == 'Bat Events      :': bat_events   = parse_number(line_str[19:].split()[0])
-                    if line_str[1:18] == 'Power Events    :': power_events = parse_number(line_str[19:].split()[0])
-                    if line_str[1:18] == 'System Fault    :': sys_events   = parse_number(line_str[19:].split()[0])
-                    
-                    if line_str.strip().startswith('Command completed'): # mark end of the block
-                        try:
-                            decode ='false' 
-                            if console_dump == 'true':
-                                print ('power           :', power)
-                                print ('voltage         :', voltage)    
-                                print ('current         :', current)
-                                print ('temperature     :', temp)
-                                print ('soc [%]         :', soc)
-                                print ('basic_st        :', basic_st)         
-                                print ('volt_st         :', volt_st)      
-                                print ('current_st      :', current_st)     
-                                print ('temp_st         :', temp_st)     
-                                print ('coul_st         :', coul_st)
-                                print ('soh_st          :', soh_st)
-                                print ('heater_st       :', heater_st)
-                                print ('bat_events      :', bat_events)
-                                print ('power_events    :', power_events)
-                                print ('sys_fault       :', sys_events)              
-                                print ('---------------------------')
-                            
+                data_set = data_set + 1
+                pwr.append(pwr_array)
+                gc.collect()
 
-                            pwr_array = {
-                                        'power': power,
-                                        'voltage': voltage,
-                                        'current': current,
-                                        'temperature': temp,
-                                        'soc': soc,
-                                        'basic_st': basic_st,
-                                        'volt_st': volt_st,
-                                        'current_st': current_st,
-                                        'temp_st':temp_st,
-                                        'soh_st':soh_st,
-                                        'coul_st': coul_st,
-                                        'heater_st': heater_st,
-                                        'bat_events': bat_events,
-                                        'power_events': power_events,
-                                        'sys_events': sys_events}
-                                    
-                            data_set       = data_set +1
-                            pwr.append(pwr_array)
+        line_str_array = []
 
-
-                            gc.collect()
-
-
-                            line_str_array = []
-                            line_str       = ""
-                            
-                            break
-                        
-                        except Exception as e:
-                            print('[ERROR] Serial parsing       : ' + str(e))
-                                
-            if data_set != power:
-                break
-                     
         if data_set == powers:
-            errors='false'
-            trials=0
-            
+            errors = 'false'
+            trials = 0
             print('[INFO ] Serial parsing       : ok')
 
         else:
             errors = 'true'
-            trials = trials+1
-                
-            if trials <= 3:                                                                                       
+            trials = trials + 1
+
+            if trials <= 3:
                 print('[WARN ] Serial parsing       : incomplete data set, retry')
+                if debug == 'true':
+                    print('[DEBUG] Serial parsing       : data_set:', data_set, 'response:', line_str_array_bak)
                 parsing_serial()
 
             else:
                 print('[WARN ] Serial parsing       : incomplete data set, not solved, skip set')
                 return
-                    
+
     except Exception as e:
         errors = 'true'
         print('[ERROR] Serial parsing       : ' + str(e))
         return
 
 def statistics():
-    try: 
+    try:
         global sys_voltage
         global sys_current
         global sys_soc
@@ -352,12 +412,12 @@ def statistics():
         sys_soc      = int(sys_soc / powers)
         sys_basic_st = pwr[0]['basic_st']                                         # status will be the master status
         sys_temp     = round((sys_temp / powers), 1)
-        
+
         print('[INFO ] Statistics           : ok')
-        
+
     except Exception as e:
         print('[ERROR] Statistics           : ' + str(e))
-        
+
 def json_serialize():
     try:
         global parsing_time
@@ -365,13 +425,10 @@ def json_serialize():
         global errors_no
         global errors
         global json_data
-        global json_data_old    
-        global bat_events_no
-        global pwr_events_no
-        global sys_events_no
+        global json_data_old
         global bats
-        
-        json_data_old = json_data        
+
+        json_data_old = json_data
         json_data={'relay_local_time':TimeStamp,
                    'powers' : powers,
                    'voltage': sys_voltage,
@@ -384,18 +441,26 @@ def json_serialize():
                    'serial_stat': {'uptime':uptime,
                                    'loops':loops_no,
                                    'errors': errors_no,
-                                   'bat_events_no': bat_events_no,
-                                   'pwr_events_no': pwr_events_no,
-                                   'sys_events_no': sys_events_no,
                                    'efficiency' :round((1-(errors_no/loops_no))*100,2),
                                    'ser_round_trip':round(parsing_time/1000,2)}
                    }
-                
+
         print('[INFO ] JSON serialization   : ok')
-        
+
     except Exception as e:
         errors = 'true'
         print('[ERROR] JSON serialization   : ' + str(e))
+
+def mqtt_publish_availability(state):
+    global mqtt_availability_state
+    if state == mqtt_availability_state:
+        return
+    try:
+        client.publish(bytes(mqtt_availability_topic, 'utf-8'), bytes(state, 'utf-8'), qos=0, retain=True)
+        mqtt_availability_state = state
+        print('[INFO ] MQTT availability    : ' + state)
+    except Exception as e:
+        print('[ERROR] MQTT availability    : ' + str(e))
 
 def mqtt_discovery():
     try:
@@ -428,20 +493,23 @@ def mqtt_discovery():
                 msg ["suggested_display_precision"] = precision[n]
 
             msg ["val_tpl"]      = "{{ value_json.value }}"
+            msg ["avty_t"]       = mqtt_availability_topic
+            msg ["pl_avail"]     = "online"
+            msg ["pl_not_avail"] = "offline"
             msg ["dev"]          = {"identifiers": [dev_name],"manufacturer": manufacturer,"model": model,"name": dev_name,"sw_version": sw_ver}
             message              = json.dumps(msg)
 
-            message = bytes(message, 'utf-8')          
+            message = bytes(message, 'utf-8')
             state_topic= bytes(state_topic, 'utf-8')
             client.publish (state_topic, message, qos=0, retain=True)
-            
+
             b = "...mqtt auto discovery - system sensors:" + str(round(config/max_config *100)) +" %"
             print (b, end="\r")
 
             msg                  = {}
             config               = config +1
-            
-            #blinking led to indicate autodiscovery running process
+
+            # blinking LED to indicate autodiscovery progress
             ledtime = time.ticks_ms()
             while time.ticks_ms() - ledtime < 30:
                 led.off()
@@ -449,7 +517,7 @@ def mqtt_discovery():
                 led.on()
                 time.sleep(0.0075)
                 led.off()
-                
+
         print("...mqtt auto discovery")
 
         # define individual batteries sensors
@@ -478,20 +546,23 @@ def mqtt_discovery():
                     msg ["suggested_display_precision"] = precision[n]
 
                 msg ["val_tpl"]      = "{{ value_json.value }}"
+                msg ["avty_t"]       = mqtt_availability_topic
+                msg ["pl_avail"]     = "online"
+                msg ["pl_not_avail"] = "offline"
                 msg ["dev"]          = {"identifiers": [dev_name],"manufacturer": manufacturer,"model": model,"name": dev_name,"sw_version": sw_ver}
                 message              = json.dumps(msg)
 
-                message = bytes(message, 'utf-8')          
+                message = bytes(message, 'utf-8')
                 state_topic= bytes(state_topic, 'utf-8')
                 client.publish (state_topic, message, qos=0, retain=True)
-            
+
                 b = "...mqtt auto discovery - battery sensors:" + str(round(config/max_config *100)) +" %"
                 print (b, end="\r")
 
                 msg                  ={}
                 config               = config +1
 
-                #blinking led to indicate autodiscovery running process
+                # blinking LED to indicate autodiscovery progress
                 ledtime = time.ticks_ms()
                 while time.ticks_ms() - ledtime < 30:
                     led.off()
@@ -499,7 +570,7 @@ def mqtt_discovery():
                     led.on()
                     time.sleep(0.0075)
                     led.off()
-                    
+
         print("...mqtt auto discovery")
 
         # define individual cells sensors
@@ -526,7 +597,7 @@ def mqtt_discovery():
                 stat_cla     =["measurement"]
                 unit_of_meas =["V"]
                 precision    =[3]
-                
+
             max_config   = max_config + powers*len(ids)*cells
 
             for power in range (1, powers+1):
@@ -551,20 +622,23 @@ def mqtt_discovery():
                             msg ["suggested_display_precision"] = precision[n]
 
                         msg ["val_tpl"]      = "{{ value_json.value }}"
+                        msg ["avty_t"]       = mqtt_availability_topic
+                        msg ["pl_avail"]     = "online"
+                        msg ["pl_not_avail"] = "offline"
                         msg ["dev"]          = {"identifiers": [dev_name+"_cells"],"manufacturer": manufacturer,"model": model,"name": dev_name+"_cells","sw_version": sw_ver}
                         message              = json.dumps(msg)
 
-                        message = bytes(message, 'utf-8')          
+                        message = bytes(message, 'utf-8')
                         state_topic= bytes(state_topic, 'utf-8')
                         client.publish (state_topic, message, qos=0, retain=True)
-            
+
                         b = "...mqtt auto discovery - cell sensors:" + str(round(config/max_config *100)) +" %"
                         print (b, end="\r")
 
                         msg                  ={}
                         config               = config +1
-                        
-                        #blinking led to indicate autodiscovery running process
+
+                        # blinking LED to indicate autodiscovery progress
                         ledtime = time.ticks_ms()
                         while time.ticks_ms() - ledtime < 30:
                             led.off()
@@ -572,12 +646,12 @@ def mqtt_discovery():
                             led.on()
                             time.sleep(0.0075)
                             led.off()
-                            
-            # only for medium and high monitoring level                
-            if cells_mon_level == 'medium' or cells_mon_level == 'high':                
-                
+
+            # only for medium and high monitoring levels
+            if cells_mon_level == 'medium' or cells_mon_level == 'high':
+
                 print("...mqtt auto discovery")
-                
+
                 # define individual cells sensors -- statistics
                 names        =["voltage_delta", "voltage_min",  "voltage_max",  "temperature_delta",    "temperature_min",  "temperature_max"]
                 ids          =["voltage_delta", "voltage_min",  "voltage_max",  "temperature_delta",    "temperature_min",  "temperature_max"]
@@ -604,20 +678,23 @@ def mqtt_discovery():
                             msg ["suggested_display_precision"] = precision[n]
 
                         msg ["val_tpl"]      = "{{ value_json.value }}"
+                        msg ["avty_t"]       = mqtt_availability_topic
+                        msg ["pl_avail"]     = "online"
+                        msg ["pl_not_avail"] = "offline"
                         msg ["dev"]          = {"identifiers": [dev_name+"_cells"],"manufacturer": manufacturer,"model": model,"name": dev_name+"_cells","sw_version": sw_ver}
                         message              = json.dumps(msg)
 
-                        message = bytes(message, 'utf-8')          
+                        message = bytes(message, 'utf-8')
                         state_topic= bytes(state_topic, 'utf-8')
                         client.publish (state_topic, message, qos=0, retain=True)
-                
+
                         b = "...mqtt auto discovery - statistics sensors:" + str(round(config/max_config *100)) +" %"
                         print (b, end="\r")
 
                         msg                  ={}
                         config               = config +1
-                        
-                        #blinking led to indicate autodiscovery running process
+
+                        # blinking LED to indicate autodiscovery progress
                         ledtime = time.ticks_ms()
                         while time.ticks_ms() - ledtime < 30:
                             led.off()
@@ -625,7 +702,7 @@ def mqtt_discovery():
                             led.on()
                             time.sleep(0.0075)
                             led.off()
-                        
+
         print("...mqtt auto discovery")
 
     except Exception as e:
@@ -638,22 +715,22 @@ def mqtt_publish():
             # We will publish these later
             if key in ["devices", "cells_data"]:
                 continue
-            
+
             # If the value was published before, skip it
             if json_data_old and value == json_data_old[key]:
                 continue
-            
+
             state_topic = "pytes_serial/" + dev_name + "/" + key
             if isinstance(value, dict) or isinstance(value, list):
                 message = json.dumps(value)
             else:
                 message = json.dumps({'value': value})
-                
-            message = bytes(message, 'utf-8')          
+
+            message = bytes(message, 'utf-8')
             state_topic= bytes(state_topic, 'utf-8')
             client.publish (state_topic, message, qos=0, retain=True)
-        
-        
+
+
         # Publish device topics
         for device in json_data["devices"]:
             device_idx = str(device["power"] - 1)
@@ -662,7 +739,7 @@ def mqtt_publish():
                 # Do not publish these
                 if key in ["power"]:
                     continue
-                
+
                 # If the value was published before, skip it
                 if (
                     json_data_old and
@@ -677,12 +754,12 @@ def mqtt_publish():
                     message = json.dumps(value)
                 else:
                     message = json.dumps({'value': value})
-                    
-                message = bytes(message, 'utf-8')          
+
+                message = bytes(message, 'utf-8')
                 state_topic= bytes(state_topic, 'utf-8')
                 client.publish (state_topic, message, qos=0, retain=True)
-                
-        
+
+
         if cells_monitoring == 'true':
             for device in json_data["cells_data"]:
                 device_idx = str(device["power"] - 1)
@@ -707,12 +784,12 @@ def mqtt_publish():
                         message = json.dumps(value)
                     else:
                         message = json.dumps({'value': value})
-                        
-                    message = bytes(message, 'utf-8')          
+
+                    message = bytes(message, 'utf-8')
                     state_topic= bytes(state_topic, 'utf-8')
                     client.publish (state_topic, message, qos=0, retain=True)
-                    
-                    
+
+
                 # Publish cell topics
                 for cell in device["cells"]:
                     cell_idx = str(cell["cell"] - 1)
@@ -729,7 +806,7 @@ def mqtt_publish():
                             len(json_data_old["cells_data"]) == powers and
                             len(json_data["cells_data"][device["power"] - 1]["cells"]) == cells and
                             len(json_data_old["cells_data"][device["power"] - 1]["cells"]) == cells and
-                            value == json_data_old["cells_data"][device["power"] - 1]["cells"][cell["cell"] - 1][key]
+                            value == json_data_old["cells_data"][device["power"] - 1]["cells"][cell["cell"] - 1].get(key)
                         ):
                             continue
 
@@ -738,22 +815,24 @@ def mqtt_publish():
                             message = json.dumps(value)
                         else:
                             message = json.dumps({'value': value})
-                            
-                        message = bytes(message, 'utf-8')          
+
+                        message = bytes(message, 'utf-8')
                         state_topic= bytes(state_topic, 'utf-8')
                         client.publish (state_topic, message, qos=0, retain=True)
-                        
-                    
+
+
                 gc.collect()
 
-                
-                
+
+
         print('[INFO ] MQTT publish         : ok')
+        return True
 
     except Exception as e:
         print('[ERROR] MQTT publish         : ' + str(e))
-        
-def parsing_bat(power):
+        return False
+
+def parsing_bat(power, retry=0):
     # Diagnostic variables are initialized before the try block so the
     # exception logger can safely report the available parsing context.
     write_return   = None
@@ -778,7 +857,7 @@ def parsing_bat(power):
         global bat
         bat = []
         req  = ('bat '+ str(power))
-        size = 800
+        size = 1000
         write_return = serial_write(req,size)
 
         if write_return != 'true':
@@ -876,6 +955,36 @@ def parsing_bat(power):
 
         return "true"
 
+    except (ValueError, IndexError) as e:
+        if retry < 3:
+            if debug == 'true':
+                print('[DEBUG] Parsing bat          : power ' + str(power) + ': invalid data, retry ' + str(retry + 1) + ': ' + str(e))
+            return parsing_bat(power, retry + 1)
+
+        print('[ERROR] Parsing bat          : invalid data after retries')
+        print('[ERROR] Parsing bat          : power ' + str(power))
+        print('[ERROR] Parsing bat          : write_return=' + str(write_return))
+        print('[ERROR] Parsing bat          : read_return=' + str(read_return))
+        print('[ERROR] Parsing bat          : row=' + str(diag_row))
+        print('[ERROR] Parsing bat          : fields=' + str(len(diag_line)))
+        print('[ERROR] Parsing bat          : raw=' + repr(diag_line_str))
+        print('[ERROR] Parsing bat          : data=' + str(diag_line))
+        print(
+            '[ERROR] Parsing bat          : indexes: cell=' + str(cell_idx) +
+            ', volt=' + str(volt_idx) +
+            ', curr=' + str(curr_idx) +
+            ', temp=' + str(temp_idx) +
+            ', base_st=' + str(base_st_idx) +
+            ', volt_st=' + str(volt_st_idx) +
+            ', curr_st=' + str(curr_st_idx) +
+            ', temp_st=' + str(temp_st_idx) +
+            ', soc=' + str(soc_idx) +
+            ', coulomb=' + str(coulomb_idx)
+        )
+        print('[ERROR] Parsing bat          : error=' + str(e))
+        return "false"
+
+
     except Exception as e:
         print('[ERROR] Parsing bat          : power ' + str(power))
         print('[ERROR] Parsing bat          : write_return=' + str(write_return))
@@ -902,13 +1011,13 @@ def parsing_bat(power):
 def check_cells():
     try:
         global bats
-        
+
         for power in range (1, powers+1):
             if parsing_bat(power)=="true":
-               
-                # statistics availailable only for medium and high monitoring level 
+
+                # statistics available only for medium and high monitoring levels
                 if cells_mon_level=='medium' or cells_mon_level=='high':
-                   # statistics -- calculate min,mix of cells data of each power
+                   # statistics -- calculate min/max cell values for each battery
                     output = {"voltage" : [float('inf'),float('-inf')],
                               "temperature" : [float('inf'),float('-inf')]
                               }
@@ -930,9 +1039,9 @@ def check_cells():
                         'temperature_max':output['temperature'][1],
                         'cells':bat
                     }
-                    
+
                 else:
-                    # statistics not available for 'low' level monitoring 
+                    # statistics not available for 'low' monitoring level
                     stat = {
                         'power':power,
                         'cells':bat
@@ -946,7 +1055,7 @@ def check_cells():
             else:
                 if debug=='true':
                     print('[DEBUG] Check cells          : power ' + str(power) + ': skipped, parsing failed')
-                
+
         print('[INFO ] Check cells          : ok')
 
     except Exception as e:
@@ -968,11 +1077,11 @@ def reboot_machine():
 #-----------------------------main loop-----------------------------
 init = 'true'
 print ('START - ' + version)
-# init control LED
+# initialize control LED
 led = machine.Pin(2,machine.Pin.OUT)
 led.on()
 
-#connect to wifi network
+# connect to Wi-Fi network
 wlan = network.WLAN(network.STA_IF)
 wlan.active(True)
 
@@ -981,7 +1090,7 @@ if wlan.isconnected():
     print('...wlan started in the connected state, trying to reconnect')
 else:
     print('...wlan started in the disconnected state, trying to connect')
-    
+
 #time.sleep(0.5)
 ledtime = time.ticks_ms()
 while time.ticks_ms() - ledtime < 500:
@@ -1001,13 +1110,13 @@ while wlan.isconnected() == False:
 print('...wlan connection successful IP: ' + str(wlan.ifconfig()[0]))
 led.off()
 
-#clock synch
+# clock synchronization
 try:
     ntptime.settime()
 except Exception as e:
     print('...clock synch initialization failed: ', e)
-    
-# uart serial initialization
+
+# UART serial initialization
 try:
     uart = machine.UART (2, 115200) # init with given parameters
     uart.init (115200, bits=8, parity=None, stop=1, rxbuf=2048, timeout=5, timeout_char=5)
@@ -1015,7 +1124,7 @@ try:
 except Exception as e:
     print('...serial initialization failed: ', e)
     init='false'
-    
+
 # MQTT initialization
 client_id = ubinascii.hexlify(machine.unique_id())
 client = MQTTClient(client_id, server=mqtt_broker, port=mqtt_port, user=mqtt_user, password=mqtt_pass, keepalive=30)
@@ -1027,8 +1136,8 @@ try:
 except Exception as e:
     print('...MQTT initialization failed: ', e)
     init='false'
-    
-# restart ESP32 if initialisation failed
+
+# restart ESP32 if initialization failed
 if init=='false':
     print('...program initialisation failed restart machine in 20s')
     reboot_machine()
@@ -1039,31 +1148,34 @@ print('------------------------------------------------------')
 
 json_data = {}
 
-# define time interval when full set of MQTT data will be sent
+# interval for publishing the full MQTT data set
 FULL_UPDATE_EVERY_MIN = 5
 last_full_update      = 0
+
+# hardware watchdog: feed while waiting, never inside a processing cycle
+wdt = machine.WDT(timeout=60000)
 
 # starting main loop
 while True:
     time.sleep(0.2)
-    if (time.ticks_ms() - start_time)/1000 > reading_freq:                       
-        
+    if (time.ticks_ms() - start_time)/1000 > reading_freq:
+
         led.on()
-        loops_no       = loops_no +1                                    
-        
+        loops_no       = loops_no +1
+
         now            = time.localtime()
         TimeStamp      = "{}-{}-{} {}:{}".format(now[0], now[1], now[2],now[3], now[4])
         print ('relay local time:', TimeStamp)
-        
+
         uptime = round((time.ticks_ms()- up_time)/86400000, 3)
         print ('serial uptime   :', uptime)
         start_time          = time.ticks_ms()
         parsing_time        = 0
         check_cells_time    = 0
-        statistics_time     = 0 
+        statistics_time     = 0
         json_serialize_time = 0
         mqtt_publish_time   = 0
-        
+
         if errors == 'false':
             parsing_time = time.ticks_ms()
             parsing_serial()
@@ -1071,7 +1183,21 @@ while True:
 
             if debug=='true':
                 print('[DEBUG] Serial parsing       : free mem: ' + str(gc.mem_free()) + ', time: ' + str(round(parsing_time / 1000, 2)) + ' s')
-        
+
+        try:
+            client.ping()
+        except Exception as e:
+            print('[ERROR] MQTT ping            : ' + str(e))
+
+        # Track PWR communication independently of MQTT errors.
+        pwr_ok = errors == 'false' and len(pwr) == powers
+        if pwr_ok:
+            mqtt_failed_cycles = 0
+        else:
+            mqtt_failed_cycles = mqtt_failed_cycles + 1
+            if mqtt_availability_threshold > 0 and mqtt_failed_cycles >= mqtt_availability_threshold:
+                mqtt_publish_availability('offline')
+
         if cells_monitoring == 'true' and errors == 'false':
             check_cells_time = time.ticks_ms()
             check_cells()
@@ -1080,13 +1206,13 @@ while True:
 
             if debug=='true':
                 print('[DEBUG] Check cells          : free mem: ' + str(gc.mem_free()) + ', time: ' + str(round(check_cells_time / 1000, 2)) + ' s')
-                
+
         if errors == 'false':
             statistics_time = time.ticks_ms()
             statistics()
             statistics_time = (time.ticks_ms() - statistics_time)
 
-            
+
         if errors == 'false':
             json_serialize_time = time.ticks_ms()
             json_serialize()
@@ -1094,7 +1220,7 @@ while True:
 
             if debug=='true':
                 print('[DEBUG] JSON serialization   : free mem: ' + str(gc.mem_free()) + ', time: ' + str(round(json_serialize_time / 1000, 2)) + ' s')
-            
+
         if errors == 'false':
             now_ts = time.ticks_ms()
 
@@ -1111,34 +1237,44 @@ while True:
                     print('[DEBUG] MQTT publish         : WiFi connected')
                 else:
                     print('[DEBUG] MQTT publish         : WiFi disconnected')
-                
-            mqtt_publish()
+
+            if mqtt_availability_state != 'online' or mqtt_retry_full_update:
+                json_data_old = None
+
+            mqtt_published = mqtt_publish()
+            if mqtt_published and pwr_ok:
+                mqtt_retry_full_update = False
+                mqtt_publish_availability('online')
+            elif not mqtt_published:
+                mqtt_retry_full_update = True
             mqtt_publish_free_mem = gc.mem_free()
-                
+
             mqtt_publish_time = (time.ticks_ms() - mqtt_publish_time)
             if debug=='true':
                 print('[DEBUG] MQTT publish         : free mem: ' + str(mqtt_publish_free_mem) + ', time: ' + str(round(mqtt_publish_time / 1000, 2)) + ' s')
-         
+
         if errors != 'false' :
             errors_no = errors_no + 1
-            
-   
+
         print('[INFO ] UART stat            : retries: ' + str(uart_retries_no) + ', skipped: ' + str(uart_failures_no))
         print('[INFO ] Serial stat          : loops: ' + str(loops_no) + ', errors: ' + str(errors_no) + ', efficiency: ' + str(round((1 - (errors_no / loops_no)) * 100, 2)) + ' %')
-        print('[INFO ] Parsing round-trip   :', round(parsing_time / 1000, 2), 's') 
+        print('[INFO ] Parsing round-trip   :', round(parsing_time / 1000, 2), 's')
         print('[INFO ] Total round-trip     :', round(parsing_time / 1000, 2)+round(statistics_time / 1000, 2)+round(json_serialize_time / 1000, 2)+round(mqtt_publish_time / 1000, 2), 's')
-        if debug=='true':    
-            print('[DEBUG] End of cycle         : allocated mem: ' + str(gc.mem_alloc()) + ', free mem: ' + str(gc.mem_free())) 
+        if debug=='true':
+            print('[DEBUG] End of cycle         : allocated mem: ' + str(gc.mem_alloc()) + ', free mem: ' + str(gc.mem_free()))
         print ('------------------------------------------------------')
-        
+
         if auto_reboot != 0 and auto_reboot < uptime:
             print('[WARN ] Main loop            : scheduled auto reboot in 20 s')
             reboot_machine()
-            
-        #clear variables
+
+        # clear variables
         pwr        = []
-        bats       = []       
+        bats       = []
         errors     = 'false'
         trials     = 0
         led.off()
+        wdt.feed()
+    else:
+        wdt.feed()
 
